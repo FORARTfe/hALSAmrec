@@ -40,6 +40,4 @@ arecord --device=hw:CARD=X18XR18,DEV=0 --channels=18 --file-type=raw \
 	--format=S32_LE --rate=48000 --buffer-time=20000000 \
 	> "${MNT}/${name}.raw" 2> >(ts -s >&2)
 
-logger "done?"
-
 rm "$RUNFILE"
