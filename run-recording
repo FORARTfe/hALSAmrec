@@ -1,0 +1,45 @@
+#!/bin/sh
+
+[ -e /dev/sda1 ] || exit
+
+{ arecord -L | grep -q X18; } || exit
+
+LOCKFILE=/tmp/reclockfile
+RUNFILE=/tmp/recrunning
+touch "$LOCKFILE"
+
+{
+	flock 200
+	if [ -e "/tmp/recrunning" ]; then
+		# somebody else has already kicked off recording
+		exit;
+	fi
+	echo $$ >"$RUNFILE"
+} 200>"$LOCKFILE"
+
+exec >/tmp/LOGME
+exec 2>&1
+
+MNT=/tmp/mnt
+
+mkdir -p "$MNT"
+
+mount /dev/sda1 "$MNT" ||
+	{ logger "unable to mount /dev/sda1"; rm "$RUNFILE"; exit; }
+
+while true; do
+	name=$(date +"%Y-%m-%d-%H%M%S")
+	logfile="/${MNT}/${name}.log"
+	if [ ! -e "$logfile" ]; then break; fi
+done
+
+exec > "$logfile"
+exec 2>&1
+
+arecord --device=hw:CARD=X18XR18,DEV=0 --channels=18 --file-type=raw \
+	--format=S32_LE --rate=48000 --buffer-time=20000000 \
+	> "${MNT}/${name}.raw" 2> >(ts -s >&2)
+
+logger "done?"
+
+rm "$RUNFILE"
