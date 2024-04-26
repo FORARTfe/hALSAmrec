@@ -1,34 +1,48 @@
 #!/bin/sh
 
-[ -e /dev/sda1 ] || exit
-
-{ arecord -L | grep -q X18; } || exit
-
+device=$( arecord -l|grep '^card' )
 LOCKFILE=/tmp/reclockfile
 RUNFILE=/tmp/recrunning
 touch "$LOCKFILE"
+MNT=/tmp/mnt
 
 {
 	flock 200
-	if [ -e "/tmp/recrunning" ]; then
-		# somebody else has already kicked off recording
-		exit;
+	recorder=$( cat "$RUNFILE" )
+	[ -e /dev/sd?1 ] && [ -n "$device" ]
+	ready=$?
+	if [ -n "$recorder" ] && [ $ready -ne 0 ]; then
+		# whoops someone is still trying to record even though
+		# something's been disconnected; try to clean up:
+		umount -l "$MNT"
+		rm "$RUNFILE"
+		killall -9 arecord
+		killall -9 run-recording
+		exit
 	fi
+	if [ $ready -ne 0 ]; then
+		exit
+	fi
+	if [ -n "$recorder" ]; then
+		# somebody else has already kicked off recording
+		exit
+	fi
+	# OK, we're ready and nobody else has done anything yet:
 	echo $$ >"$RUNFILE"
 } 200>"$LOCKFILE"
 
-exec >/tmp/LOGME
+exec >/tmp/TESTLOG
 exec 2>&1
-
-MNT=/tmp/mnt
 
 mkdir -p "$MNT"
 
-mount /dev/sda1 "$MNT" ||
-	{ logger "unable to mount /dev/sda1"; rm "$RUNFILE"; exit; }
+dsk=/dev/sd?1
+
+mount $dsk "$MNT" ||
+	{ logger "unable to mount /dev/$dsk"; rm "$RUNFILE"; exit; }
 
 while true; do
-	name=$(date +"%Y-%m-%d-%H%M%S")
+	name=$(date +"%Y-%m-%d-%Hh%Mm%Ss")
 	logfile="/${MNT}/${name}.log"
 	if [ ! -e "$logfile" ]; then break; fi
 done
@@ -36,8 +50,11 @@ done
 exec > "$logfile"
 exec 2>&1
 
-arecord --device=hw:CARD=X18XR18,DEV=0 --channels=18 --file-type=raw \
+# probably better to parse $device somehow.  Should get
+# channel count and other parameters automatically too.
+arecord --device=hw:0,0 --channels=18 --file-type=raw \
 	--format=S32_LE --rate=48000 --buffer-time=20000000 \
 	> "${MNT}/${name}.raw" 2> >(ts -s >&2)
 
+umount "$MNT"
 rm "$RUNFILE"
