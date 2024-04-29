@@ -1,0 +1,16 @@
+#!/bin/sh
+
+# From https://askubuntu.com/questions/868266/how-to-record-multitrack-indefinitely
+
+RAWFILE="$1"
+
+TRACKS=18
+CHANNEL=$TRACKS
+while [ $CHANNEL -ge 1 ]; do
+	FILENAME=track$CHANNEL.wav
+	sox --type raw --bits 32 --channels $TRACKS \
+		--encoding signed-integer --rate 44100 \
+		--endian little "$RAWFILE" $FILENAME remix $CHANNEL
+        CHANNEL=`expr $CHANNEL - 1`
+done
+
