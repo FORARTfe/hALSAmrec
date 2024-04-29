@@ -1,0 +1,18 @@
+I wanted to use my wireless router (a Linksys WRT3200ACM) to record all
+channels from my mixer (a Behringer X18) with minimal setup required by
+me: recording automatically starts whenever the router detects that both
+the mixer and a USB drive are plugged in.
+
+Prerequisites, besides installing openwrt and configuring it, include:
+
+	opkg install alsa-utils kmod-usb-storage block-mount kmod-usb3 \
+		moreutils kmod-usb-audio usbutils perbase-time
+
+I may have forgotten some others.
+
+Back-of-the-envelope calculations say there will be about 3.5MB/s, which
+I think most flash drives can handle.  That comes to about 12GB an hour,
+and VFAT has a 4G filesize limit, so I'm using ext4.
+
+It seems to work, but it's a bit of an ugly hack that's specific to my
+hardware.
