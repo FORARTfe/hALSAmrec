@@ -52,6 +52,8 @@ exec 2>&1
 
 # probably better to parse $device somehow.  Should get
 # channel count and other parameters automatically too.
+# snippet originally taken from
+# https://askubuntu.com/questions/868266/how-to-record-multitrack-indefinitely
 arecord --device=hw:0,0 --channels=18 --file-type=raw \
 	--format=S32_LE --rate=44100 --buffer-time=20000000 \
 	> "${MNT}/${name}.raw" 2> >(ts -s >&2)
