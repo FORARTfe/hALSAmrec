@@ -3,7 +3,7 @@
 MNT=/tmp/mnt
 recorder=""
 
-trap 'echo updating' SIGHUP
+trap 'true' SIGHUP
 
 sleep infinity &
 dummy=$!
