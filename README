@@ -3,9 +3,10 @@ channels from my mixer (a Behringer X18) with minimal setup required by
 me: recording automatically starts whenever the router detects that both
 the mixer and a USB drive are plugged in.
 
-To do that I drop a one-liner script into /etc/hotplug.d/{usb,block}
-that calls the run-recording script.  Then I use raw2tracks to take
-turn the resulting raw file into 18 wav files.
+To do that I run the included "recorder" script on startup and then drop
+a one-liner script into /etc/hotplug.d/{usb,block} that does a "killall
+-SIGHUP recorder".  Then I use raw2tracks to take turn the resulting raw
+file into 18 wav files.
 
 Prerequisites, besides installing openwrt and configuring it, include:
 
@@ -20,3 +21,6 @@ and VFAT has a 4G filesize limit, so I'm using ext4.
 
 It seems to work, but it's a bit of an ugly hack that's specific to my
 hardware.
+
+Note it assumes there's a unique /dev/sd?1, and writes to that whenever
+it finds it.

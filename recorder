@@ -1,0 +1,56 @@
+#!/bin/sh -x
+
+MNT=/tmp/mnt
+recorder=""
+
+trap 'echo updating' SIGHUP
+
+# do we need to clean this one up at the end somehow?:
+sleep infinity &
+dummy=$!
+
+first=0
+
+while true; do
+	if [ $first -eq 0 ]; then first=1; else
+		wait $dummy
+	fi
+	card=$( arecord -l|grep '^card' )
+	disk=/dev/sd?1
+	[ -e $disk ] && [ -n "$card" ]
+	ready=$?
+	if [ $ready -ne 0 ]; then
+		if [ -n "$recorder" ]; then
+			# recording's still running but something's
+			# been disconnected; try to clean up:
+			# openwrt actually seems to unmount automatically,
+			# but, just to be sure:
+			umount -l "$MNT"
+			kill -9 $recorder
+			recorder=""
+		fi
+		continue
+	fi
+	if [ -n "$recorder" ]; then continue; fi
+	# openwrt seems to delete mountpoints on unmount automatically,
+	# so we need to recate it here:
+	mkdir -p "$MNT"
+	mount $disk "$MNT" || continue
+	while true; do
+		name=$(date +"%Y-%m-%d-%Hh%Mm%Ss")
+		logfile="/${MNT}/${name}.log"
+		if [ ! -e "$logfile" ]; then break; fi
+		sleep 1
+	done
+	{
+		# probably better to parse $device somehow.  Should get
+		# channel count and other parameters automatically too.
+		# snippet originally taken from
+		# https://askubuntu.com/questions/868266/how-to-record-multitrack-indefinitely
+		arecord --device=hw:0,0 --channels=18 --file-type=raw \
+		        --format=S32_LE --rate=44100 --buffer-time=20000000 \
+			> "${MNT}/${name}.raw" 2> >(ts -s >&2) &
+		recorder=$!
+
+	} # >"$logfile" 2>&1
+done
