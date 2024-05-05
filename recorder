@@ -5,9 +5,13 @@ recorder=""
 
 trap 'echo updating' SIGHUP
 
-# do we need to clean this one up at the end somehow?:
 sleep infinity &
 dummy=$!
+
+trap '	kill $dummy;
+	[ -n $recorder ] && kill $recorder;
+	umount -l "$MNT";
+	exit'	SIGTERM
 
 first=0
 
