@@ -9,7 +9,7 @@ sleep infinity &
 dummy=$!
 
 trap '	kill $dummy;
-	[ -n $recorder ] && kill $recorder;
+	[ -n "$recorder" ] && kill $recorder;
 	umount -l "$MNT";
 	exit'	SIGTERM
 
