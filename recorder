@@ -17,12 +17,15 @@ first=0
 
 while true; do
 	if [ $first -eq 0 ]; then first=1; else
-		wait $dummy
+		wait -n $dummy $recorder
 	fi
 	card=$( arecord -l|grep '^card' )
 	disk=/dev/sd?1
 	[ -e $disk ] && [ -n "$card" ]
 	ready=$?
+	# PIDs can be reused, but this test is probably reliable enough
+	# for our purposes:
+	if [ -n "$recorder" -a ! -e /proc/$recorder ]; then recorder=""; fi
 	if [ $ready -ne 0 ]; then
 		if [ -n "$recorder" ]; then
 			# recording's still running but something's
