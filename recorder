@@ -17,7 +17,9 @@ first=0
 
 while true; do
 	if [ $first -eq 0 ]; then first=1; else
-		wait -n $dummy $recorder
+		if [ -n "$recorder" ]; then waiton=$recorder;
+					else waiton=$dummy; fi
+		wait $waiton
 	fi
 	card=$( arecord -l|grep '^card' )
 	disk=/dev/sd?1
