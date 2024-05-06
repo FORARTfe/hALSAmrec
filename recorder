@@ -27,7 +27,10 @@ while true; do
 	ready=$?
 	# PIDs can be reused, but this test is probably reliable enough
 	# for our purposes:
-	if [ -n "$recorder" -a ! -e /proc/$recorder ]; then recorder=""; fi
+	if [ -n "$recorder" -a ! -e /proc/$recorder ]; then
+		recorder="";
+		umount -l "$MNT"
+	fi
 	if [ $ready -ne 0 ]; then
 		if [ -n "$recorder" ]; then
 			# recording's still running but something's
@@ -42,7 +45,7 @@ while true; do
 	fi
 	if [ -n "$recorder" ]; then continue; fi
 	# openwrt seems to delete mountpoints on unmount automatically,
-	# so we need to recate it here:
+	# so we need to recreate it here:
 	mkdir -p "$MNT"
 	mount $disk "$MNT" || continue
 	while true; do
