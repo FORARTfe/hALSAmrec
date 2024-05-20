@@ -30,7 +30,7 @@ define Package/autorecorder/install
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) ./recorder $(1)/usr/sbin/recorder
 	$(INSTALL_DIR) $(1)/etc/init.d
-	$(INSTALL_CONF) ./initscript $(1)/etc/init.d/autorecorder
+	$(INSTALL_BIN) ./initscript $(1)/etc/init.d/autorecorder
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/block
 	$(INSTALL_CONF) ./hotplug $(1)/etc/hotplug.d/block/hotplug
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/usb
