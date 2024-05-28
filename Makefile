@@ -32,9 +32,9 @@ define Package/autorecorder/install
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./initscript $(1)/etc/init.d/autorecorder
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/block
-	$(INSTALL_CONF) ./hotplug $(1)/etc/hotplug.d/block/hotplug
+	$(INSTALL_CONF) ./hotplug $(1)/etc/hotplug.d/block/autorecorder
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/usb
-	$(INSTALL_CONF) ./hotplug $(1)/etc/hotplug.d/usb/hotplug
+	$(INSTALL_CONF) ./hotplug $(1)/etc/hotplug.d/usb/autorecorder
 endef
 
 $(eval $(call BuildPackage,autorecorder))
