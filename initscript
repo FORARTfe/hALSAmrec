@@ -17,3 +17,7 @@ start_service()
 	procd_set_param reload_signal SIGHUP
 	procd_close_instance
 }
+
+reload_service() {
+	procd_send_signal autorecorder
+}
