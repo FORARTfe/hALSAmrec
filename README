@@ -9,7 +9,7 @@ To use this, you need to:
   moreutils kmod-usb-audio usbutils perbase-time
   (and possibly others I've forgotten...)
 - copy recorder to /usr/sbin
-- copy initscript to /etc/recorder
+- copy initscript to /etc/init.d/autorecorder
 - copy hotplug to /etc/hotplug.d/block and /etchotplug.d/usb
 - /etc/init.d/autorecorder enable
 
