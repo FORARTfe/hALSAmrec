@@ -12,11 +12,11 @@ Similar projects:
 Hotplug:
 - https://bbs.archlinux.org/viewtopic.php?id=173317
 
-FS-related:
+FS:
 - https://darwinsdata.com/should-i-use-ntfs-or-ext4-on-ubuntu/
 
 Raspberry:
-https://www.researchgate.net/profile/Roy-Longbottom/publication/327467963_Raspberry_Pi_3B_32_bit_and_64_bit_Benchmarks_and_Stress_Tests/links/5b91053692851c6b7ec939b3/Raspberry-Pi-3B-32-bit-and-64-bit-Benchmarks-and-Stress-Tests.pdf
+- https://www.researchgate.net/profile/Roy-Longbottom/publication/327467963_Raspberry_Pi_3B_32_bit_and_64_bit_Benchmarks_and_Stress_Tests/links/5b91053692851c6b7ec939b3/Raspberry-Pi-3B-32-bit-and-64-bit-Benchmarks-and-Stress-Tests.pdf
 
 arecord:
 - https://explainshell.com/explain/1/arecord
