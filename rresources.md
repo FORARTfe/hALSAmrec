@@ -1,9 +1,9 @@
 Here are some resources that could be considered in the future for more enhancements:
 
 Repos:
-- https://github.com/maniac0r/rpi-usb-audio-tweaks
 - https://github.com/knutopia/Modlogr
 - https://github.com/anselbrandt/pi-recorder
+- https://github.com/maniac0r/rpi-usb-audio-tweaks
 
 Similar projects:
 - https://dikant.de/2018/02/28/raspberry-xr18-recorder
