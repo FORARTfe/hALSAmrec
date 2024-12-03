@@ -1,4 +1,4 @@
-A customization of @bfields's [openwrt-recording](https://github.com/bfields/openwrt-recording#readme) to be more generic and usable on any ALSA-backended system.
+A customization of @bfields's [openwrt-recording](https://github.com/bfields/openwrt-recording#readme) script to be more generic/usable on any ALSA-backended system.
 
 Planned changes:
 - automatic interface probing (done, needs tuning);
