@@ -1,7 +1,6 @@
 Here are some resources that could be considered in the future for more enhancements:
 
 Repos:
-- https://github.com/premultiply/x32loudness
 - https://github.com/maniac0r/rpi-usb-audio-tweaks
 - https://github.com/knutopia/Modlogr
 - https://github.com/anselbrandt/pi-recorder
