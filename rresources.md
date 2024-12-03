@@ -20,5 +20,8 @@ Raspberry:
 arecord:
 - https://explainshell.com/explain/1/arecord
 
+Moode:
+- https://www.bitlab.nl/page_id=1103
+
 Other:
 - https://www.cameramemoryspeed.com/reviews/micro-sd-cards/
