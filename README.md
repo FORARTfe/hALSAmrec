@@ -2,7 +2,7 @@ A customization of @bfields's [openwrt-recording](https://github.com/bfields/ope
 
 Planned changes:
 - automatic interface probing (done, needs tuning);
-- SD-card (NTFS) recording (done);
+- SD-card - NTFS - recording (done);
 - raw2tracks automation & Windows port (done, needs testing).
 
 **NONE OF THESE MODS ARE PUBLISHED YET.**
