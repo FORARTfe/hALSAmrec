@@ -1,29 +1,8 @@
-I wanted to use my wireless router (a Linksys WRT3200ACM) to record all
-channels from my mixer (a Behringer X18) automatically with nothing
-required other than plugging flash drive and mixer into the router and
-turning it on.
+A customization of @bfields's [openwrt-recording](https://github.com/bfields/openwrt-recording#readme) to be more generic and usable on any ALSA-backended system.
 
-To use this, you need to:
-- install openwrt on your router
-- also install: alsa-utils kmod-usb-storage block-mount kmod-usb3
-  moreutils kmod-usb-audio usbutils perbase-time
-  (and possibly others I've forgotten...)
-- copy recorder to /usr/sbin
-- copy initscript to /etc/init.d/autorecorder
-- copy hotplug to /etc/hotplug.d/block and /etchotplug.d/usb
-- /etc/init.d/autorecorder enable
+Planned changes:
+- automatic interface probing (done, needs tuning);
+- SD-card (NTFS) recording (done);
+- raw2tracks automation & Windows port (done, needs testing).
 
-Then, once it detects a flash drive and X18 are both plugged in, it
-automatically starts recording.
-
-After I'm done I move the flash drive to a linux machine and run
-"raw2tracks" to output file to 18 wav files.
-
-Back-of-the-envelope calculations say there will be about 3.5MB/s, which
-I think most flash drives can handle.  That comes to about 12GB an hour,
-and VFAT has a 4G filesize limit, so I'm using ext4.
-
-It seems to work, but it's a bit of an ugly hack that's specific to my
-hardware.
-
-Note it assumes the flash drive will show up as the unique /dev/sd?1.
+**NONE OF THESE MODS ARE PUBLISHED YET.**
