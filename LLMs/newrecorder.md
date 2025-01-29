@@ -1,4 +1,4 @@
-This code has been grnerated by prompting mods to Gemini then refined by deepseek+ChatGPT (peer review of the code):
+This code has been grnerated by prompting mods to Gemini then refined by deepseek+ChatGPT peer review:
 ```
 #!/bin/sh
 #
