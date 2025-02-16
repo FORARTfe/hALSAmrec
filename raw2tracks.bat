@@ -1,9 +1,9 @@
 @echo off
 
-:: File RAW di input
+:: RAW input file
 set "RAWFILE=%1"
 
-:: Numero di tracce
+:: Tracks number
 set TRACKS=18
 set /a CHANNEL=%TRACKS%
 
