@@ -25,8 +25,8 @@ ALSA/SOX/FFMPEG:
 Moode:
 - https://www.bitlab.nl/page_id=1103
 
-Other:
-- https://www.cameramemoryspeed.com/reviews/micro-sd-cards/
+SD cards:
+- [https://www.cameramemoryspeed.com/reviews/micro-sd-cards/](https://elinux.org/RPi_SD_cards)
 
 
 Copilot-geneted interface probing:
