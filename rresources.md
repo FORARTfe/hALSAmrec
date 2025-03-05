@@ -26,7 +26,7 @@ Moode:
 - https://www.bitlab.nl/page_id=1103
 
 SD cards:
-- [https://www.cameramemoryspeed.com/reviews/micro-sd-cards/](https://elinux.org/RPi_SD_cards)
+- [RPi SD cards](https://elinux.org/RPi_SD_cards)
 
 
 Copilot-geneted interface probing:
