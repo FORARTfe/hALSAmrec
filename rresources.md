@@ -28,9 +28,8 @@ Moode:
 SD cards:
 - [RPi SD cards](https://elinux.org/RPi_SD_cards)
 
-Android remote control app:
-[Home App for Android](https://github.com/Domi04151309/HomeApp#readme)
-
+Android remote control apps:
+- [Home App for Android](https://github.com/Domi04151309/HomeApp#readme)
 
 Copilot-geneted interface probing:
 ```
