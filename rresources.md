@@ -27,6 +27,7 @@ Moode:
 
 SD cards:
 - [RPi SD cards](https://elinux.org/RPi_SD_cards)
+- [Demystifying 128GB SD Cards on the Raspberry Pi 4](https://thelinuxcode.com/use-128gb-sd-card-raspberry-pi/)
 
 Android remote control apps:
 - [Home App for Android](https://github.com/Domi04151309/HomeApp#readme)
