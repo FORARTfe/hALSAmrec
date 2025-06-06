@@ -33,6 +33,10 @@ SD cards:
 Android remote control apps:
 - [Home App for Android](https://github.com/Domi04151309/HomeApp#readme)
 
+Audio Bit Rate and File Size Calculators:
+- https://www.theaudioarchive.com/TAA_Resources_File_Size.htm
+- https://www.unitconverters.net/data-transfer/kbps-to-mbps.htm
+
 Copilot-geneted interface probing:
 ```
 #!/bin/bash
