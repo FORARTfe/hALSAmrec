@@ -4,6 +4,7 @@ Repos:
 - https://github.com/knutopia/Modlogr
 - https://github.com/anselbrandt/pi-recorder
 - https://github.com/maniac0r/rpi-usb-audio-tweaks
+- https://www.richardmudhar.com/blog/2016/01/timed-audio-field-recorder-with-a-raspberry-pi-cirrus-logic-audio-card/
 
 Similar projects:
 - https://dikant.de/2018/02/28/raspberry-xr18-recorder
