@@ -9,11 +9,11 @@ subdevice=$(echo "$arecord_list" | grep -A 1 "card $device" | awk '/Subdevice/ {
 hw_params=$(arecord -D "hw:$device,$subdevice" --dump-hw-params 2>/dev/null)
 
 # Extract max values directly using sed
-channels=$(echo "$hw_params" | awk -F': ' '/CHANNELS:/ {print $2}' | sed -n 's/.*[[(]\([0-9]*\) \([0-9]*\)[])]/\2/p')
-rate=$(echo "$hw_params" | awk -F': ' '/RATE:/ {print $2}' | sed -n 's/.*[[(]\([0-9]*\) \([0-9]*\)[])]/\2/p')
-format=$(echo "$hw_params" | awk -F': ' '/FORMAT:/ {print $2}' | awk '{print $NF}')
-buffer_time=$(echo "$hw_params" | awk -F': ' '/BUFFER_TIME:/ {print $2}' | sed -n 's/.*[[(]\([0-9]*\) \([0-9]*\)[])]/\2/p')
-buffer_size=$(echo "$hw_params" | awk -F': ' '/BUFFER_SIZE:/ {print $2}' | sed -n 's/.*[[(]\([0-9]*\) \([0-9]*\)[])]/\2/p')
+channels=$(echo "$hw_params" | awk -F': ' '/CHANNELS:/ {print $2}' | sed -n 's/.*[[(]\([0-9]*\) \([0-9]*\)[])]/\2/p' | echo "")
+rate=$(echo "$hw_params" | awk -F': ' '/RATE:/ {print $2}' | sed -n 's/.*[[(]\([0-9]*\) \([0-9]*\)[])]/\2/p' | echo "")
+format=$(echo "$hw_params" | awk -F': ' '/FORMAT:/ {print $2}' | awk '{print $NF}' | echo "")
+buffer_time=$(echo "$hw_params" | awk -F': ' '/BUFFER_TIME:/ {print $2}' | sed -n 's/.*[[(]\([0-9]*\) \([0-9]*\)[])]/\2/p' | echo "")
+buffer_size=$(echo "$hw_params" | awk -F': ' '/BUFFER_SIZE:/ {print $2}' | sed -n 's/.*[[(]\([0-9]*\) \([0-9]*\)[])]/\2/p' | echo "")
 
 # Log detected parameters
 echo "Detected parameters:\nDEVICE: $device,$subdevice\n-- channels: $channels\n-- rate:$rate\n-- format:$format\n-- buffer time:$buffer_time\n-- buffer size:$buffer_size"
