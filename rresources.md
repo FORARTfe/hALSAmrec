@@ -1,5 +1,9 @@
 Here are some resources that could be considered in the future for more enhancements:
 
+**DATA FLUX (RB Pi 3B+):**
+
+![Animated_DataFlux](https://github.com/user-attachments/assets/ae435626-1507-4ea9-b431-7e20a07f3f89)
+
 Repos:
 - https://github.com/knutopia/Modlogr
 - https://github.com/anselbrandt/pi-recorder
