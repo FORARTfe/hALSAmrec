@@ -1,16 +1,129 @@
-#!/bin/sh
+#!/bin/bash
 
-# From https://askubuntu.com/questions/868266/how-to-record-multitrack-indefinitely
-
+# RAW input file
 RAWFILE="$1"
+if [ -z "$RAWFILE" ]; then
+    echo "Usage: $(basename "$0") filename"
+    echo "Expected filename format: <timestamp>_<channels>-<rate>-<bitformat>.raw"
+    exit 1
+fi
 
-TRACKS=18
-CHANNEL=$TRACKS
-while [ $CHANNEL -ge 1 ]; do
-	FILENAME=track$CHANNEL.wav
-	sox --type raw --bits 32 --channels $TRACKS \
-		--encoding signed-integer --rate 44100 \
-		--endian little "$RAWFILE" $FILENAME remix $CHANNEL
-        CHANNEL=`expr $CHANNEL - 1`
+# Extract filename without extension
+BASENAME=$(basename "$RAWFILE" .raw)
+
+# Parse filename: <timestamp>_<channels>-<rate>-<bitformat>
+IFS='_' read -r TIMESTAMP PARAMS <<< "$BASENAME"
+
+if [ -z "$TIMESTAMP" ]; then
+    echo "Error: Could not parse timestamp from filename"
+    exit 1
+fi
+
+IFS='-' read -r CHANNELS RATE BITFORMAT <<< "$PARAMS"
+
+if [ -z "$CHANNELS" ]; then
+    echo "Error: Could not parse channels from filename"
+    exit 1
+fi
+if [ -z "$RATE" ]; then
+    echo "Error: Could not parse rate from filename"
+    exit 1
+fi
+if [ -z "$BITFORMAT" ]; then
+    echo "Error: Could not parse bitformat from filename"
+    exit 1
+fi
+
+# Map BITFORMAT to Sox parameters
+BITS=""
+ENCODING=""
+ENDIAN=""
+
+# Signed/Unsigned Integer
+case "$BITFORMAT" in
+    S8)
+        BITS=8
+        ENCODING="signed-integer"
+        ;;
+    U8)
+        BITS=8
+        ENCODING="unsigned-integer"
+        ;;
+    S16_LE|S16_BE|U16_LE|U16_BE|S24_LE|S24_BE|U24_LE|U24_BE|S32_LE|S32_BE|U32_LE|U32_BE|S24_3LE|S24_3BE|U24_3LE|U24_3BE|S20_3LE|S20_3BE|U20_3LE|U20_3BE|S18_3LE|S18_3BE|U18_3LE|U18_3BE)
+        BITS=${BITFORMAT:1:2}
+        if [ "${BITFORMAT:0:1}" = "U" ]; then
+            ENCODING="unsigned-integer"
+        else
+            ENCODING="signed-integer"
+        fi
+        if [ "${BITFORMAT: -2}" = "LE" ]; then
+            ENDIAN="little"
+        elif [ "${BITFORMAT: -2}" = "BE" ]; then
+            ENDIAN="big"
+        fi
+        ;;
+    FLOAT_LE)
+        BITS=32
+        ENCODING="float"
+        ENDIAN="little"
+        ;;
+    FLOAT_BE)
+        BITS=32
+        ENCODING="float"
+        ENDIAN="big"
+        ;;
+    FLOAT64_LE)
+        BITS=64
+        ENCODING="float"
+        ENDIAN="little"
+        ;;
+    FLOAT64_BE)
+        BITS=64
+        ENCODING="float"
+        ENDIAN="big"
+        ;;
+    DSD_U8)
+        ENCODING="dsd"
+        BITS=8
+        ;;
+    DSD_U16_LE)
+        ENCODING="dsd"
+        BITS=16
+        ENDIAN="little"
+        ;;
+    DSD_U16_BE)
+        ENCODING="dsd"
+        BITS=16
+        ENDIAN="big"
+        ;;
+    DSD_U32_LE)
+        ENCODING="dsd"
+        BITS=32
+        ENDIAN="little"
+        ;;
+    DSD_U32_BE)
+        ENCODING="dsd"
+        BITS=32
+        ENDIAN="big"
+        ;;
+    DSD_U8_BE)
+        ENCODING="dsd"
+        BITS=8
+        ENDIAN="big"
+        ;;
+esac
+
+OUTDIR="$TIMESTAMP"
+mkdir -p "$OUTDIR"
+
+echo "Extracting $CHANNELS tracks from $RAWFILE ($BITS bits, $RATE Hz, $ENCODING, $ENDIAN endian):"
+
+# Extract each channel
+for ((CHANNEL=CHANNELS; CHANNEL>=1; CHANNEL--)); do
+    FILENAME="track${CHANNEL}.wav"
+    echo "- writing $OUTDIR/$FILENAME"
+    sox --type raw --bits "$BITS" --channels "$CHANNELS" --encoding "$ENCODING" --rate "$RATE" --endian "$ENDIAN" "$RAWFILE" "$OUTDIR/$FILENAME" remix "$CHANNEL"
 done
 
+echo "$CHANNELS tracks successfully extracted!"
+read -p "Press enter to continue..."
