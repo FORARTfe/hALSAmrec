@@ -34,6 +34,12 @@ SD cards:
 - [RPi SD cards](https://elinux.org/RPi_SD_cards)
 - [Demystifying 128GB SD Cards on the Raspberry Pi 4](https://thelinuxcode.com/use-128gb-sd-card-raspberry-pi/)
 - [Raspberry Pi microSD card performance comparison](https://www.jeffgeerling.com/blog/2019/raspberry-pi-microsd-card-performance-comparison-2019)
+- [Best microSD Cards for Raspberry Pi](https://bret.dk/best-raspberry-pi-micro-sd-cards/#Raspberry-Pi-3-Model-B)
+- [Best microSD Cards for Raspberry Pi 2025](https://www.tomshardware.com/best-picks/raspberry-pi-microsd-cards)
+
+USB Class Compliant audio:
+- [What does USB Class Compliant mean?](https://web.archive.org/web/20240304024310/https://kb.audiomodeling.com/en/c/grow-your-knowledge/d/what-does-usb-class-compliant-mean/)
+- [List of Working/Non Working Class Compliant USB Interfaces](https://www.mpc-forums.com/viewtopic.php?f=48&t=211654) / [USB Class Compliance: For Discussion of Issues & Bugs](https://www.mpc-forums.com/viewtopic.php?f=48&t=211575)
 
 Android remote control apps:
 - [Home App for Android](https://github.com/Domi04151309/HomeApp#readme)
