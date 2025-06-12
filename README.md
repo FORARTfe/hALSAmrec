@@ -4,9 +4,9 @@ A customization of J. Bruce Fields' [openwrt-recording](https://github.com/bfiel
 
 :white_check_mark: SD-card (NTFS) recording;
 
-:white_check_mark: automatic interface probing (done);
+:white_check_mark: automatic interface probing;
 
-:white_check_mark: raw2tracks automation & Windows port (done).
+:white_check_mark: automated tracks splitting (on Windows too).
 
 ## :construction: Todo
 
