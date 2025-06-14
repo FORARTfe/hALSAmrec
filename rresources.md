@@ -39,6 +39,10 @@ SD cards:
 
 USB Class Compliant audio:
 - [What does USB Class Compliant mean?](https://web.archive.org/web/20240304024310/https://kb.audiomodeling.com/en/c/grow-your-knowledge/d/what-does-usb-class-compliant-mean/)
+- [Using Audio Interfaces](https://wiki.loopypro.com/Using_Audio_Interfaces)
+- [MIXX Hardware Compatibility](https://github.com/mixxxdj/mixxx/wiki/Hardware-Compatibility)
+- [USB Audio Class](https://jimmywongiot.com/2020/04/08/usb-audio-class/)
+- 
 - [List of Working/Non Working Class Compliant USB Interfaces](https://www.mpc-forums.com/viewtopic.php?f=48&t=211654) / [USB Class Compliance: For Discussion of Issues & Bugs](https://www.mpc-forums.com/viewtopic.php?f=48&t=211575)
 
 Android remote control apps:
