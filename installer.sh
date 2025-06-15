@@ -1,11 +1,13 @@
 #!/bin/sh
-
 set -e
 
-# Define the list of packages to install (added exfat-fuse and exfat-utils)
+REPO="MarcoRavich/hALSAmrec"
+TMPDIR="/tmp/hALSAmrec-install.$$"
+
+# Define the list of packages to install
 PACKAGES="alsa-utils kmod-usb-storage block-mount kmod-usb3 moreutils kmod-usb-audio usbutils perlbase-time kmod-fs-exfat"
 
-echo "Checking for and installing missing OpenWRT packages..."
+echo "[*] Checking and install missing OpenWRT packages..."
 
 # Update package lists
 opkg update
@@ -27,4 +29,33 @@ for pkg in $PACKAGES; do
     fi
 done
 
-echo "Package installation check complete."
+echo "[*] Downloading latest files from $REPO..."
+rm -rf "$TMPDIR"
+mkdir -p "$TMPDIR"
+cd "$TMPDIR"
+
+wget -q https://raw.githubusercontent.com/MarcoRavich/hALSAmrec/main/recorder
+wget -q https://raw.githubusercontent.com/MarcoRavich/hALSAmrec/main/initscript
+wget -q https://raw.githubusercontent.com/MarcoRavich/hALSAmrec/main/hotplug
+
+echo "[*] Moving files in place (requires root)..."
+mv recorder /usr/sbin/recorder
+chmod 755 /usr/sbin/recorder
+
+mv initscript /etc/init.d/autorecorder
+chmod 755 /etc/init.d/autorecorder
+
+mkdir -p /etc/hotplug.d/block
+mkdir -p /etc/hotplug.d/usb
+mv hotplug /etc/hotplug.d/block/autorecorder
+cp /etc/hotplug.d/block/autorecorder /etc/hotplug.d/usb/autorecorder
+chmod 644 /etc/hotplug.d/block/autorecorder /etc/hotplug.d/usb/autorecorder
+
+echo "[*] Enabling autorecorder service..."
+/etc/init.d/autorecorder enable
+
+echo "[*] Cleaning up..."
+cd /
+rm -rf "$TMPDIR"
+
+echo "[*] Installation complete."
