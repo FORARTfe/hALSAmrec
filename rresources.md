@@ -53,3 +53,6 @@ Android remote control apps:
 Audio Bit Rate and File Size Calculators:
 - https://www.theaudioarchive.com/TAA_Resources_File_Size.htm
 - https://www.unitconverters.net/data-transfer/kbps-to-mbps.htm
+
+OpenWRT:
+- [How to build OpenWrt minimal image, or a custom firmware](https://www.pcsuggest.com/build-openwrt-minimal-image-custom-firmware/)
