@@ -64,7 +64,7 @@ while true; do
 	# openwrt seems to delete mountpoints on unmount automatically,
 	# so we need to recreate it here:
 	mkdir -p "$MNT"
-	mount -o big_writes $disk "$MNT" || continue
+	mount $disk "$MNT" || continue
 	while true; do
 		name=$(date +%s)
     	logfile="/${MNT}/${name}.log"
