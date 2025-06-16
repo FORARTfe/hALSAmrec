@@ -39,7 +39,7 @@ while true; do
 		wait $waiton
 	fi
 	card=$( arecord -l|grep '^card' )
-	disk=/dev/mmcblk0?3
+	disk=/dev/mmcblk?p3
 	[ -e $disk ] && [ -n "$card" ]
 	ready=$?
 	# PIDs can be reused, but this test is probably reliable enough
