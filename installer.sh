@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-REPO="MarcoRavich/hALSAmrec"
+REPO="FORARTfe/hALSAmrec"
 TMPDIR="/tmp/hALSAmrec-install.$$"
 
 # Define the list of packages to install
@@ -34,9 +34,9 @@ rm -rf "$TMPDIR"
 mkdir -p "$TMPDIR"
 cd "$TMPDIR"
 
-wget -q https://raw.githubusercontent.com/MarcoRavich/hALSAmrec/main/recorder
-wget -q https://raw.githubusercontent.com/MarcoRavich/hALSAmrec/main/initscript
-wget -q https://raw.githubusercontent.com/MarcoRavich/hALSAmrec/main/hotplug
+wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/recorder
+wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/initscript
+wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/hotplug
 
 echo "[*] Moving files in place (requires root)..."
 mv recorder /usr/sbin/recorder
