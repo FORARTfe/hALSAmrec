@@ -16,8 +16,10 @@ Similar projects:
 Hotplug:
 - https://bbs.archlinux.org/viewtopic.php?id=173317
 
-FS:
-- https://darwinsdata.com/should-i-use-ntfs-or-ext4-on-ubuntu/
+exFAT:
+- [Should my SD card be NTFS or exFAT?](https://darwinsdata.com/should-my-sd-card-be-ntfs-or-exfat/)
+- [Exfat Vs Ntfs: Choosing The Optimal File System For Your Sd Card For Seamless Data Management](https://vtechinsider.com/exfat-vs-ntfs-for-sd-card/)
+- [The Ultimate Showdown: What’s Faster, NTFS or exFAT?](https://thetechylife.com/whats-faster-ntfs-or-exfat/)
 
 Raspberry:
 - https://www.researchgate.net/profile/Roy-Longbottom/publication/327467963_Raspberry_Pi_3B_32_bit_and_64_bit_Benchmarks_and_Stress_Tests/links/5b91053692851c6b7ec939b3/Raspberry-Pi-3B-32-bit-and-64-bit-Benchmarks-and-Stress-Tests.pdf
