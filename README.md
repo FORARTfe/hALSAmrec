@@ -2,7 +2,7 @@ A customization of J. Bruce Fields' [openwrt-recording](https://github.com/bfiel
 
 ## :sound: Features
 
-:white_check_mark: SD-card (exFAT) recording;
+:white_check_mark: SD-card ([exFAT](https://github.com/MarcoRavich/hALSAmrec/wiki/Why-exFAT-Was-Chosen-for-the-SD-Card-Recording-Partition)) recording;
 
 :white_check_mark: automatic [USB Class Compliant audio device](https://github.com/MarcoRavich/hALSAmrec/wiki/USB-Class-Compliant-audio-devices) probing;
 
