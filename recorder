@@ -65,6 +65,21 @@ while true; do
 	# so we need to recreate it here:
 	mkdir -p "$MNT"
 	mount $disk "$MNT" || continue
+
+	# Check available disk space (after mounting, before recording)
+	avail_kb=$(df -k "$MNT" | awk 'NR==2 {print $4}')
+	avail_mb=$((avail_kb / 1024))
+	if [ "$avail_mb" -le 100 ]; then
+		if [ -n "$recorder" ]; then
+			kill -9 $recorder
+			recorder=""
+		fi
+		umount -l "$MNT"
+		sleep 5
+		continue
+	fi
+
+
 	while true; do
 		name=$(date +%s)
     	logfile="/${MNT}/${name}.log"
