@@ -56,3 +56,4 @@ Audio Bit Rate and File Size Calculators:
 
 OpenWRT:
 - [How to build OpenWrt minimal image, or a custom firmware](https://www.pcsuggest.com/build-openwrt-minimal-image-custom-firmware/)
+- [Use Android Phone as advance router using OpenWrt](https://dev.to/varunpalekar/use-android-phone-as-advance-router-using-openwrt-26hf)
