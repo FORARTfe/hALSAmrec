@@ -6,11 +6,11 @@ A customization of J. Bruce Fields' [openwrt-recording](https://github.com/bfiel
 
 :white_check_mark: automatic [USB Class Compliant audio device](https://github.com/MarcoRavich/hALSAmrec/wiki/USB-Class-Compliant-audio-devices) probing;
 
-:white_check_mark: automated tracks splitting (on Windows too).
+:white_check_mark: automated tracks splitting (on Windows too);
+
+:white_check_mark: Automated setup.
 
 ## :construction: Todo
-
-:white_square_button: Automated setup;
 
 :white_square_button: Start/stop recording using [Home App for Android™](https://github.com/Domi04151309/HomeApp#readme);
 
