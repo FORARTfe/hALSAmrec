@@ -39,7 +39,15 @@ while true; do
 		wait $waiton
 	fi
 	card=$( arecord -l|grep '^card' )
-	disk=/dev/mmcblk?p3
+
+	# Detect the only exFAT partition available in the system
+	disk=""
+	exfat_parts=$(lsblk -o NAME,FSTYPE -nr | awk '$2=="exfat"{print "/dev/"$1}')
+	count=$(echo "$exfat_parts" | wc -w)
+	if [ "$count" -eq 1 ]; then
+		disk="$exfat_parts"
+	fi
+
 	[ -e $disk ] && [ -n "$card" ]
 	ready=$?
 	# PIDs can be reused, but this test is probably reliable enough
