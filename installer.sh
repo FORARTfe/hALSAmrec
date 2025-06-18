@@ -5,7 +5,7 @@ REPO="FORARTfe/hALSAmrec"
 TMPDIR="/tmp/hALSAmrec-install.$$"
 
 # Define the list of packages to install
-PACKAGES="alsa-utils kmod-usb-storage block-mount kmod-usb3 moreutils kmod-usb-audio usbutils perlbase-time kmod-fs-exfat"
+PACKAGES="alsa-utils kmod-usb-storage block-mount kmod-usb3 moreutils kmod-usb-audio usbutils perlbase-time kmod-fs-exfat lsblk"
 
 echo "[*] Checking and install missing OpenWRT packages..."
 
