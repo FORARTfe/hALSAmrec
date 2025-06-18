@@ -1,4 +1,4 @@
-A customization of J. Bruce Fields' [openwrt-recording](https://github.com/bfields/openwrt-recording#readme) script to be more generic/usable on any ALSA-backended system.
+A customization of J. Bruce Fields' [openwrt-recording](https://github.com/bfields/openwrt-recording#readme) script to be more generic.
 
 ## :sound: Features
 
