@@ -34,9 +34,10 @@ rm -rf "$TMPDIR"
 mkdir -p "$TMPDIR"
 cd "$TMPDIR"
 
-wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/test/recorder
+wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/recorder
 wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/initscript
 wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/hotplug
+wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/recorder-web
 
 echo "[*] Moving files in place (requires root)..."
 mv recorder /usr/sbin/recorder
@@ -162,6 +163,16 @@ chmod 755 /usr/bin/recorder-web
 
 echo "[*] Enabling autorecorder service..."
 /etc/init.d/autorecorder enable
+
+echo "[*] Configuring firewall for web interface..."
+uci add firewall rule
+uci set firewall.@rule[-1].name='Allow-Recorder-Web'
+uci set firewall.@rule[-1].src='lan'
+uci set firewall.@rule[-1].dest_port='8080'
+uci set firewall.@rule[-1].proto='tcp'
+uci set firewall.@rule[-1].target='ACCEPT'
+uci commit firewall
+/etc/init.d/firewall reload
 
 echo "[*] Starting web interface..."
 /usr/bin/recorder-web start
