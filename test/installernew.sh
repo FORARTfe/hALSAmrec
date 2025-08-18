@@ -34,7 +34,7 @@ rm -rf "$TMPDIR"
 mkdir -p "$TMPDIR"
 cd "$TMPDIR"
 
-wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/test/recorder
+wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/recorder
 wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/initscript
 wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/hotplug
 wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/recorder-web
@@ -51,115 +51,6 @@ mkdir -p /etc/hotplug.d/usb
 mv hotplug /etc/hotplug.d/block/autorecorder
 cp /etc/hotplug.d/block/autorecorder /etc/hotplug.d/usb/autorecorder
 chmod 644 /etc/hotplug.d/block/autorecorder /etc/hotplug.d/usb/autorecorder
-
-echo "[*] Creating web interface..."
-cat > /usr/bin/recorder-web << 'EOF'
-#!/bin/sh
-# Simple web interface for recorder control
-
-PORT=8080
-PIDFILE=/var/run/recorder-web.pid
-
-handle_request() {
-    while IFS= read -r line; do
-        case "$line" in
-            GET*/cm?*) 
-                QUERY="${line#*\?}"
-                QUERY="${QUERY% HTTP/*}"
-                break
-                ;;
-            "") break ;;
-        esac
-    done
-    
-    CMND=$(echo "$QUERY" | sed -n 's/.*cmnd=\([^&]*\).*/\1/p' | sed 's/%20/ /g')
-    
-    case "$CMND" in
-        "Power ON")
-            if pgrep -f '/usr/sbin/recorder' >/dev/null; then
-                echo "Already running"
-            else
-                /etc/init.d/autorecorder start >/dev/null 2>&1
-                sleep 2
-                if pgrep -f '/usr/sbin/recorder' >/dev/null; then
-                    echo "Started successfully"
-                else
-                    echo "Failed to start"
-                fi
-            fi
-            ;;
-        "Power OFF")
-            if ! pgrep -f '/usr/sbin/recorder' >/dev/null; then
-                echo "Already stopped"
-            else
-                /etc/init.d/autorecorder stop >/dev/null 2>&1
-                sleep 2
-                if ! pgrep -f '/usr/sbin/recorder' >/dev/null; then
-                    echo "Stopped successfully"
-                else
-                    echo "Failed to stop"
-                fi
-            fi
-            ;;
-        "Status")
-            if pgrep -f '/usr/sbin/recorder' >/dev/null; then
-                PID=$(pgrep -f '/usr/sbin/recorder')
-                echo "RUNNING (PID: $PID)"
-            else
-                echo "STOPPED"
-            fi
-            ;;
-        *)
-            echo "Unknown command: $CMND"
-            ;;
-    esac
-}
-
-case "$1" in
-    start)
-        if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
-            echo "Web interface already running"
-            exit 1
-        fi
-        
-        echo "Starting recorder web interface on port $PORT..."
-        (while true; do
-            (echo -e "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nAccess-Control-Allow-Origin: *\r\n\r\n$(handle_request)") | nc -l -p $PORT -q 1
-        done) &
-        
-        echo $! > "$PIDFILE"
-        echo "Web interface started (PID: $!)"
-        ;;
-    stop)
-        if [ -f "$PIDFILE" ]; then
-            PID=$(cat "$PIDFILE")
-            if kill -0 "$PID" 2>/dev/null; then
-                kill "$PID"
-                rm -f "$PIDFILE"
-                echo "Web interface stopped"
-            else
-                echo "Web interface not running"
-                rm -f "$PIDFILE"
-            fi
-        else
-            echo "Web interface not running"
-        fi
-        ;;
-    status)
-        if [ -f "$PIDFILE" ] && kill -0 $(cat "$PIDFILE") 2>/dev/null; then
-            echo "Web interface running (PID: $(cat "$PIDFILE"))"
-        else
-            echo "Web interface not running"
-        fi
-        ;;
-    *)
-        echo "Usage: $0 {start|stop|status}"
-        exit 1
-        ;;
-esac
-EOF
-
-chmod 755 /usr/bin/recorder-web
 
 echo "[*] Enabling autorecorder service..."
 /etc/init.d/autorecorder enable
