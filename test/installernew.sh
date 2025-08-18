@@ -34,10 +34,10 @@ rm -rf "$TMPDIR"
 mkdir -p "$TMPDIR"
 cd "$TMPDIR"
 
-wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/recorder
+wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/test/recorder
 wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/initscript
 wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/hotplug
-wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/recorder-web
+wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/test/recorder-web
 
 echo "[*] Moving files in place (requires root)..."
 mv recorder /usr/sbin/recorder
