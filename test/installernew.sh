@@ -43,6 +43,9 @@ echo "[*] Moving files in place (requires root)..."
 mv recorder /usr/sbin/recorder
 chmod 755 /usr/sbin/recorder
 
+mv recorder-web /usr/bin/recorder-web
+chmod 755 /usr/bin/recorder-web
+
 mv initscript /etc/init.d/autorecorder
 chmod 755 /etc/init.d/autorecorder
 
