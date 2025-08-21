@@ -34,9 +34,10 @@ rm -rf "$TMPDIR"
 mkdir -p "$TMPDIR"
 cd "$TMPDIR"
 
-wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/recorder
-wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/initscript
-wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/hotplug
+# Always fetch the latest scripts (test/recorder for advanced detection/logic)
+wget -q "https://raw.githubusercontent.com/$REPO/test/recorder" -O recorder || { echo "Failed to download recorder"; exit 1; }
+wget -q "https://raw.githubusercontent.com/$REPO/initscript" -O initscript || { echo "Failed to download initscript"; exit 1; }
+wget -q "https://raw.githubusercontent.com/$REPO/hotplug" -O hotplug || { echo "Failed to download hotplug"; exit 1; }
 
 echo "[*] Moving files in place (requires root)..."
 mv recorder /usr/sbin/recorder
