@@ -34,9 +34,9 @@ mkdir -p "$TMPDIR"
 cd "$TMPDIR"
 
 # Always fetch the latest scripts (test/recorder for advanced detection/logic)
-wget -q "https://raw.githubusercontent.com/FORARTfe/hALSAmrec/test/recorder" -O recorder || { echo "Failed to download recorder"; exit 1; }
-wget -q "https://raw.githubusercontent.com/FORARTfe/hALSAmrec/initscript" -O initscript || { echo "Failed to download initscript"; exit 1; }
-wget -q "https://raw.githubusercontent.com/FORARTfe/hALSAmrec/hotplug" -O hotplug || { echo "Failed to download hotplug"; exit 1; }
+wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/test/recorder -O recorder || { echo "Failed to download recorder"; exit 1; }
+wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/initscript -O initscript || { echo "Failed to download initscript"; exit 1; }
+wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/hotplug -O hotplug || { echo "Failed to download hotplug"; exit 1; }
 
 echo "[*] Moving files in place (requires root)..."
 mv recorder /usr/sbin/recorder
