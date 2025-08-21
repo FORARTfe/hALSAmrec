@@ -2,42 +2,54 @@
 set -e
 
 REPO="FORARTfe/hALSAmrec"
-BRANCH="main"
 TMPDIR="/tmp/hALSAmrec-install.$$"
 
-# Required packages for OpenWRT - minimal and hardware/FS-aware
+# Define the list of packages to install
 PACKAGES="alsa-utils kmod-usb-storage block-mount kmod-usb3 kmod-usb-audio usbutils kmod-fs-exfat"
 
-echo "[*] Checking and installing missing OpenWRT packages..."
+echo "[*] Checking and install missing OpenWRT packages..."
+
+# Update package lists
 opkg update
 
+# Iterate over each package
 for pkg in $PACKAGES; do
-    if opkg list-installed | grep -q "^${pkg} -"; then
-        echo "  - $pkg already installed."
+    echo "Checking for package: $pkg"
+    # Check if the package is already installed
+    if opkg list-installed | grep -q "^$pkg -"; then
+        echo "$pkg is already installed."
     else
-        echo "  - Installing $pkg ..."
-        opkg install "$pkg" || { echo "Error: Could not install $pkg"; exit 1; }
+        echo "$pkg is not installed. Attempting to install..."
+        opkg install "$pkg"
+        if [ $? -eq 0 ]; then
+            echo "$pkg installed successfully."
+        else
+            echo "Error: Failed to install $pkg. Please check your internet connection or package availability."
+        fi
     fi
 done
 
-echo "[*] Downloading latest files from $REPO:$BRANCH..."
+echo "[*] Downloading latest files from $REPO..."
 rm -rf "$TMPDIR"
 mkdir -p "$TMPDIR"
 cd "$TMPDIR"
 
-# Always fetch the latest scripts (test/recorder for advanced detection/logic)
-wget -q "https://raw.githubusercontent.com/$REPO/$BRANCH/test/recorder" -O recorder || { echo "Failed to download recorder"; exit 1; }
-wget -q "https://raw.githubusercontent.com/$REPO/$BRANCH/initscript" -O initscript || { echo "Failed to download initscript"; exit 1; }
-wget -q "https://raw.githubusercontent.com/$REPO/$BRANCH/hotplug" -O hotplug || { echo "Failed to download hotplug"; exit 1; }
+wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/recorder
+wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/initscript
+wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/hotplug
 
-echo "[*] Installing scripts (requires root)..."
-install -m 755 recorder /usr/sbin/recorder
+echo "[*] Moving files in place (requires root)..."
+mv recorder /usr/sbin/recorder
+chmod 755 /usr/sbin/recorder
 
-install -m 755 initscript /etc/init.d/autorecorder
+mv initscript /etc/init.d/autorecorder
+chmod 755 /etc/init.d/autorecorder
 
-mkdir -p /etc/hotplug.d/block /etc/hotplug.d/usb
-install -m 644 hotplug /etc/hotplug.d/block/autorecorder
+mkdir -p /etc/hotplug.d/block
+mkdir -p /etc/hotplug.d/usb
+mv hotplug /etc/hotplug.d/block/autorecorder
 cp /etc/hotplug.d/block/autorecorder /etc/hotplug.d/usb/autorecorder
+chmod 644 /etc/hotplug.d/block/autorecorder /etc/hotplug.d/usb/autorecorder
 
 echo "[*] Enabling autorecorder service..."
 /etc/init.d/autorecorder enable
@@ -47,4 +59,3 @@ cd /
 rm -rf "$TMPDIR"
 
 echo "[*] Installation complete."
-echo "You can start the service with: /etc/init.d/autorecorder start"
