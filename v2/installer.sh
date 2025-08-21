@@ -76,3 +76,18 @@ cd /
 rm -rf "$TMPDIR"
 
 echo "[*] Installation complete."
+
+# Ask the user if they want to reboot now
+echo ""
+echo "It is recommended to reboot your device to complete the installation."
+printf "Do you want to reboot now? [y/N]: "
+read answer
+case "$answer" in
+    [yY][eE][sS]|[yY])
+        echo "Rebooting now..."
+        reboot
+        ;;
+    *)
+        echo "Reboot skipped. Please reboot manually for changes to take effect."
+        ;;
+esac
