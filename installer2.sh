@@ -6,7 +6,7 @@ BRANCH="main"
 TMPDIR="/tmp/hALSAmrec-install.$$"
 
 # Required packages for OpenWRT - minimal and hardware/FS-aware
-PACKAGES="alsa-utils kmod-usb-storage block-mount kmod-usb3 kmod-usb-audio usbutils kmod-fs-exfat lsblk"
+PACKAGES="alsa-utils kmod-usb-storage block-mount kmod-usb3 kmod-usb-audio usbutils kmod-fs-exfat"
 
 echo "[*] Checking and installing missing OpenWRT packages..."
 opkg update
