@@ -2,7 +2,7 @@ A customization of J. Bruce Fields' [openwrt-recording](https://github.com/bfiel
 
 ## :sound: Features
 
-:white_check_mark: Automated setup script;
+:white_check_mark: Setup script;
 
 :white_check_mark: automatic [USB Class Compliant audio device](https://github.com/FORARTfe/hALSAmrec/wiki/USB-Class-Compliant-audio-devices) probing;
 
