@@ -33,10 +33,10 @@ rm -rf "$TMPDIR"
 mkdir -p "$TMPDIR"
 cd "$TMPDIR"
 
-wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/test/recorder
+wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/v2/recorder
 wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/initscript
 wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/hotplug
-wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/test/controlweb_cgi
+wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/v2/controlweb_cgi
 
 echo "[*] Installing scripts (requires root)..."
 mv recorder /usr/sbin/recorder
