@@ -14,6 +14,6 @@ A customization of J. Bruce Fields' [openwrt-recording](https://github.com/bfiel
 
 ## :construction: Todo
 
-:white_square_button: Start/stop recording using [Home App for Android™](https://github.com/Domi04151309/HomeApp#readme);
+🏗️ Start/stop recording using [Home App for Android™](https://github.com/Domi04151309/HomeApp#readme);
 
 :white_square_button: LuCi dedicated page.
