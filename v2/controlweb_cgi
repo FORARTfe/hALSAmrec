@@ -67,7 +67,7 @@ case "$CMND" in
         
     *)
         echo "Unknown command: $CMND"
-        echo "Valid commands: Power ON, Power OFF, Status"
+        echo "Valid commands: START, STOP, ABOUT"
         ;;
 esac
 
