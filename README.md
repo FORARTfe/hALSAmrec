@@ -8,7 +8,7 @@ A customization of J. Bruce Fields' [openwrt-recording](https://github.com/bfiel
 
 :white_check_mark: SD-card ([exFAT](https://github.com/FORARTfeh/hALSAmrec/wiki/Why-exFAT-Was-Chosen-for-the-SD-Card-Recording-Partition)) recording;
 
-:white_check_mark: Remote start/stop (using [Home App for Android™](https://github.com/Domi04151309/HomeApp#readme) too);
+:white_check_mark: remote - webcommand - start/stop control (using [Home App for Android™](https://github.com/Domi04151309/HomeApp#readme) too);
 
 :white_check_mark: automated tracks splitting (on Windows too).
 
