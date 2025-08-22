@@ -1,0 +1,74 @@
+#!/bin/sh
+#
+# Simple CGI script for recorder control
+# Put this in /www/cgi-bin/cm and chmod +x it
+#
+# Usage examples:
+# http://router-ip/cgi-bin/cm?cmnd=START
+# http://router-ip/cgi-bin/cm?cmnd=STOP
+# http://router-ip/cgi-bin/cm?cmnd=ABOUT
+#
+
+echo "Content-type: text/plain"
+echo ""
+
+# Make sure we have been invoked properly
+if [ "$REQUEST_METHOD" != "GET" ]; then
+    echo "Error: Method not allowed"
+    exit 1
+fi
+
+# If no arguments, show usage
+if [ -z "$QUERY_STRING" ]; then
+    echo "Usage: /cgi-bin/cm?cmnd=Power%20ON|Power%20OFF|Status"
+    exit 0
+fi
+
+# Extract command parameter
+CMND=$(echo "$QUERY_STRING" | sed -n 's/^.*cmnd=\([^&]*\).*$/\1/p' | sed 's/%20/ /g')
+
+case "$CMND" in
+    "START")
+        if pgrep -f '/usr/sbin/recorder' >/dev/null 2>&1; then
+            echo "Already running"
+        else
+            /etc/init.d/autorecorder start >/dev/null 2>&1
+            sleep 2
+            if pgrep -f '/usr/sbin/recorder' >/dev/null 2>&1; then
+                echo "Started successfully"
+            else
+                echo "Failed to start"
+            fi
+        fi
+        ;;
+        
+    "STOP")
+        if ! pgrep -f '/usr/sbin/recorder' >/dev/null 2>&1; then
+            echo "Already stopped"
+        else
+            /etc/init.d/autorecorder stop >/dev/null 2>&1
+            sleep 2
+            if ! pgrep -f '/usr/sbin/recorder' >/dev/null 2>&1; then
+                echo "Stopped successfully"
+            else
+                echo "Failed to stop"
+            fi
+        fi
+        ;;
+        
+    "ABOUT")
+        if pgrep -f '/usr/sbin/recorder' >/dev/null 2>&1; then
+            PID=$(pgrep -f '/usr/sbin/recorder')
+            echo "RUNNING (PID: $PID)"
+        else
+            echo "STOPPED"
+        fi
+        ;;
+        
+    *)
+        echo "Unknown command: $CMND"
+        echo "Valid commands: Power ON, Power OFF, Status"
+        ;;
+esac
+
+exit 0
