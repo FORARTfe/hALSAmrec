@@ -18,9 +18,10 @@
 
 set -e
 
+REPO="FORARTfe/hALSAmrec"
 TMPDIR="/tmp/hALSAmrec-install.$$"
 
-# Define the list of packages to install
+# Define the list of packages to install (removed moreutils and lsblk)
 PACKAGES="alsa-utils kmod-usb-storage block-mount kmod-usb3 kmod-usb-audio usbutils kmod-fs-exfat"
 
 echo "[*] Checking and install missing OpenWRT packages..."
@@ -45,15 +46,15 @@ for pkg in $PACKAGES; do
     fi
 done
 
-echo "[*] Downloading latest files from hALSAmrec repository..."
+echo "[*] Downloading latest files from $REPO..."
 rm -rf "$TMPDIR"
 mkdir -p "$TMPDIR"
 cd "$TMPDIR"
 
-# Always fetch the latest scripts (test/recorder for advanced detection/logic)
 wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/recorder
 wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/initscript
 wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/hotplug
+wget -q https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/controlweb_cgi
 
 echo "[*] Moving files in place (requires root)..."
 mv recorder /usr/sbin/recorder
@@ -68,26 +69,21 @@ mv hotplug /etc/hotplug.d/block/autorecorder
 cp /etc/hotplug.d/block/autorecorder /etc/hotplug.d/usb/autorecorder
 chmod 644 /etc/hotplug.d/block/autorecorder /etc/hotplug.d/usb/autorecorder
 
+echo "[*] Setting up CGI web interface..."
+mkdir -p /www/cgi-bin
+mv controlweb_cgi /www/cgi-bin/cm
+chmod 755 /www/cgi-bin/cm
+
 echo "[*] Enabling autorecorder service..."
 /etc/init.d/autorecorder enable
+
+echo "[*] Web interface ready! No firewall changes needed."
+echo "  Start: http://$(uci get network.lan.ipaddr 2>/dev/null || echo '<your-ip>')/cgi-bin/cm?cmnd=Power%20ON"
+echo "  Stop:  http://$(uci get network.lan.ipaddr 2>/dev/null || echo '<your-ip>')/cgi-bin/cm?cmnd=Power%20OFF"
+echo "  Status: http://$(uci get network.lan.ipaddr 2>/dev/null || echo '<your-ip>')/cgi-bin/cm?cmnd=Status"
 
 echo "[*] Cleaning up..."
 cd /
 rm -rf "$TMPDIR"
 
 echo "[*] Installation complete."
-
-# Ask the user if they want to reboot now
-echo ""
-echo "It is recommended to reboot your device to complete the installation."
-printf "Do you want to reboot now? [y/N]: "
-read answer
-case "$answer" in
-    [yY][eE][sS]|[yY])
-        echo "Rebooting now..."
-        reboot
-        ;;
-    *)
-        echo "Reboot skipped. Please reboot manually for changes to take effect."
-        ;;
-esac
