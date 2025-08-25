@@ -1,0 +1,82 @@
+#!/bin/sh
+#
+# Simple CGI script for hALSAmrec
+# by FORART (https://forart.it/), 2025
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or (at
+# your option) any later version.
+
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+
+echo "Content-type: text/plain"
+echo ""
+
+# Make sure we have been invoked properly
+if [ "$REQUEST_METHOD" != "GET" ]; then
+    echo "Error: Method not allowed"
+    exit 1
+fi
+
+# If no arguments, show usage
+if [ -z "$QUERY_STRING" ]; then
+    echo "Usage: /cgi-bin/cm?cmnd=Power%20ON|Power%20OFF|Status"
+    exit 0
+fi
+
+# Extract command parameter
+CMND=$(echo "$QUERY_STRING" | sed -n 's/^.*cmnd=\([^&]*\).*$/\1/p' | sed 's/%20/ /g')
+
+case "$CMND" in
+    "START")
+        if pgrep -f '/usr/sbin/recorder' >/dev/null 2>&1; then
+            echo "Already running"
+        else
+            /etc/init.d/autorecorder start >/dev/null 2>&1
+            sleep 2
+            if pgrep -f '/usr/sbin/recorder' >/dev/null 2>&1; then
+                echo "Started successfully"
+            else
+                echo "Failed to start"
+            fi
+        fi
+        ;;
+        
+    "STOP")
+        if ! pgrep -f '/usr/sbin/recorder' >/dev/null 2>&1; then
+            echo "Already stopped"
+        else
+            /etc/init.d/autorecorder stop >/dev/null 2>&1
+            sleep 2
+            if ! pgrep -f '/usr/sbin/recorder' >/dev/null 2>&1; then
+                echo "Stopped successfully"
+            else
+                echo "Failed to stop"
+            fi
+        fi
+        ;;
+        
+    "ABOUT")
+        if pgrep -f '/usr/sbin/recorder' >/dev/null 2>&1; then
+            PID=$(pgrep -f '/usr/sbin/recorder')
+            echo "RUNNING (PID: $PID)"
+        else
+            echo "STOPPED"
+        fi
+        ;;
+        
+    *)
+        echo "Unknown command: $CMND"
+        echo "Valid commands: START, STOP, ABOUT"
+        ;;
+esac
+
+exit 0
