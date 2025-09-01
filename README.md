@@ -1,4 +1,4 @@
-A customization of J. Bruce Fields' [openwrt-recording](https://github.com/bfields/openwrt-recording#readme) script to be more generic/usable. <a><img align="right" width="7%" src="https://badges.credtent.org/assets/AAC-PN4Wnktv.svg" alt="Generative AI tools have been used to refine the work of a human creator."/></a>
+A customization of J. Bruce Fields' [openwrt-recording](https://github.com/bfields/openwrt-recording#readme) script to be more generic/usable. <a href="https://badges.credtent.org/creative-origin"><img align="right" width="7%" src="https://badges.credtent.org/assets/AAC-PN4Wnktv.svg" alt="Generative AI tools have been used to refine the work of a human creator."/></a>
 
 ## :sound: Features
 
