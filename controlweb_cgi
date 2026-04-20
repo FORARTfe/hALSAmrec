@@ -64,7 +64,7 @@ case "$CMND" in
         fi
         ;;
         
-    "ABOUT")
+    "STATUS")
         if pgrep -f '/usr/sbin/recorder' >/dev/null 2>&1; then
             PID=$(pgrep -f '/usr/sbin/recorder')
             echo "RUNNING (PID: $PID)"
@@ -75,7 +75,7 @@ case "$CMND" in
         
     *)
         echo "Unknown command: $CMND"
-        echo "Valid commands: START, STOP, ABOUT"
+        echo "Valid commands: START, STOP, STATUS"
         ;;
 esac
 
