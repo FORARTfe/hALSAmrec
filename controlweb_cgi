@@ -84,7 +84,7 @@ case "$CMND" in
             device=$(echo "$device_info" | grep "device [0-9]:" | sed -E 's/.*device ([0-9]+):.*/\1/')
             inputhw=$(echo "$card,$device")
             arecord_output=$(arecord -D "hw:$card,$device" --dump-hw-params 2>&1)
-            echo "$arecord_output)"
+            echo "$arecord_output"
 		fi
         ;;      
     *)
