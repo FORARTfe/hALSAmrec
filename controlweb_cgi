@@ -77,8 +77,7 @@ case "$CMND" in
         if pgrep -f '/usr/sbin/recorder' >/dev/null 2>&1; then
             echo "WARNING: recorder is running, stop to probe !"
         else
-            arecord_output=$(arecord -D "hw:0,0" --dump-hw-params 2>&1)
-            echo "$arecord_output"
+            echo "$(arecord -D "hw:0,0" --dump-hw-params 2>&1)"
 		fi
         ;;      
     *)
