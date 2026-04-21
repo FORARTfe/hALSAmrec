@@ -12,7 +12,7 @@ function action_probe()
 	
 	-- Run arecord -l and capture all output
 	local devices_data = {}
-	local fp = io.popen("arecord -l 2>&1")
+	local fp = io.popen("arecord --dump-hw-params -D hw:0,0 2>&1")
 	if fp then
 		local raw_output = fp:read("*all")
 		fp:close()
