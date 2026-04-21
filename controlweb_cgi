@@ -102,14 +102,7 @@ case "$CMND" in
                 max_rate=48000
             fi
 
-            echo "Card: $card"
-            echo "Device: $device"
-            echo "InputHW: $inputhw"
-            echo "Channels: $max_channels"
-            echo "Rate: $max_rate"
-            echo "Format: $bitformat"
-            echo "Buffer Time Max: $buffer_time_max"
-            echo "Buffer Size Max: $buffer_size_max"
+            echo "$card / $device ($max_channels channels - $max_rate Hz @ $bitformat)"
         ;;      
     *)
         echo "Unknown command: $CMND"
