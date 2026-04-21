@@ -1,0 +1,2 @@
+config halsamrec 'main'
+	option enabled '1'
