@@ -1,7 +1,7 @@
 module("luci.controller.halsamrec", package.seeall)
 
 function index()
-	entry({"admin", "services", "halsamrec"}, alias("admin", "services", "halsamrec", "devices"), _("HALSAmRec Audio Devices"), 10).dependent = true
+	entry({"admin", "services", "halsamrec"}, alias("admin", "services", "halsamrec", "devices"), _("Audio Devices"), 10).dependent = true
 	entry({"admin", "services", "halsamrec", "devices"}, template("halsamrec/devices"), _("Audio Devices"), 10)
 	entry({"admin", "services", "halsamrec", "probe"}, call("action_probe"), nil).leaf = true
 end
