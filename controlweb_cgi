@@ -110,7 +110,7 @@ case "$CMND" in
             echo "Format: $bitformat"
             echo "Buffer Time Max: $buffer_time_max"
             echo "Buffer Size Max: $buffer_size_max"
-            ;;      
+        ;;      
     *)
         echo "Unknown command: $CMND"
         echo "Valid commands: START, STOP, STATUS, PROBE"
