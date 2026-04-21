@@ -1,4 +1,4 @@
-# HALSAmRec LuCI Interface
+# Audio device info LuCI Interface
 
 A dedicated LuCI web interface for viewing audio capture devices on OpenWrt.
 
