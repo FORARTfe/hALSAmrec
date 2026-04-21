@@ -3,9 +3,9 @@
 START=95
 
 start() {
-	echo "HALSAmRec LuCI module initialized"
+	echo "ALSA device LuCI module initialized"
 }
 
 stop() {
-	echo "HALSAmRec LuCI module stopped"
+	echo "ALSA device LuCI module stopped"
 }
