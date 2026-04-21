@@ -75,7 +75,7 @@ case "$CMND" in
         
     "PROBE")
         if pgrep -f '/usr/sbin/recorder' >/dev/null 2>&1; then
-            echo "Already running"
+            echo "WARNING: recorder is running, stop to probe !"
         else
 
             # Audio device probing
