@@ -77,10 +77,34 @@ case "$CMND" in
         if pgrep -f '/usr/sbin/recorder' >/dev/null 2>&1; then
             echo "WARNING: recorder is running, stop to probe !"
         else
-            echo "$(arecord -l | grep -A 2 "List of CAPTURE Hardware Devices" | grep -A 1 "card [0-9]:" | head -n 3)"
-        fi
-        ;;
 
+            # Audio device probing
+            device_info=$(arecord -l | grep -A 2 "List of CAPTURE Hardware Devices" | grep -A 1 "card [0-9]:" | head -n 3)
+            card=$(echo "$device_info" | grep "card [0-9]:" | sed -E 's/.*card ([0-9]+):.*/\1/')
+            device=$(echo "$device_info" | grep "device [0-9]:" | sed -E 's/.*device ([0-9]+):.*/\1/')
+            inputhw=$(echo "$card,$device")
+            arecord_output=$(arecord -D "hw:$card,$device" --dump-hw-params 2>&1)
+            max_channels=$(echo "$arecord_output" | grep "CHANNELS:" | sed -n 's/.*CHANNELS: \[\?\([0-9]*\)\( \([0-9]*\)\)\?\]/\3/p')
+            if [ -z "$max_channels" ]; then
+                max_channels=$(echo "$arecord_output" | grep "CHANNELS:" | sed -n 's/.*CHANNELS: \([0-9]*\)/\1/p')
+            fi
+            bitformat=$(echo "$arecord_output" | grep "^FORMAT:" | sed -n 's/.*FORMAT: \(.*\)/\1/p' | awk '{print $NF}')
+            if [ -z "$bitformat" ]; then
+                bitformat=$(echo "$arecord_output" | grep "^FORMAT:" | sed -n 's/.*FORMAT: \([A-Z0-9_]*\)/\1/p')
+            fi
+            buffer_time_max=$(echo "$arecord_output" | sed -n '/BUFFER_TIME:/ s/.*[\[(]\([0-9]*\) \([0-9]*\)[])].*/\2/p')
+            buffer_size_max=$(echo "$arecord_output" | sed -n '/BUFFER_SIZE:/ s/.*[\[(]\([0-9]*\) \([0-9]*\)[])].*/\2/p')
+            max_rate=$(echo "$arecord_output" | sed -n '/RATE:/ s/.*[\[(]\([0-9]*\) \([0-9]*\)[])].*/\2/p')
+            if [ -z "$max_rate" ]; then
+                max_rate=$(echo "$arecord_output" | grep "RATE:" | sed -n 's/.*RATE: \([0-9]*\)/\1/p')
+            fi
+            if [ "$max_rate" -gt 48000 ]; then
+                max_rate=48000
+            fi
+
+            echo "$card / $device ($max_channels channels - $max_rate Hz @ $bitformat)"
+		fi
+        ;;      
     *)
         echo "Unknown command: $CMND"
         echo "Valid commands: START, STOP, STATUS, PROBE"
