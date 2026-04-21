@@ -1,4 +1,59 @@
 ```
-# Executable/binary files
-controlweb_cgi
+# LuCI application build artifacts
+luci-app-halsamrec/dist/
+luci-app-halsamrec/build/
+luci-app-halsamrec/.*_cache/
+
+# LuCI specific ignores
+luci-app-halsamrec/root/www/luci-static/*/css/
+luci-app-halsamrec/root/www/luci-static/*/js/
+
+# General build artifacts
+*.o
+*.obj
+*.a
+*.so
+*.dll
+*.exe
+*.out
+
+# Dependencies
+node_modules/
+venv/
+.venv/
+__pycache__/
+*.egg-info/
+.Python
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Coverage reports
+coverage/
+htmlcov/
+.coverage
+
+# Build systems
+build/
+dist/
+target/
+.gradle/
+.mypy_cache/
+.pytest_cache/
 ```

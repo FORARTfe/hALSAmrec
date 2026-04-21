@@ -74,6 +74,34 @@ case "$CMND" in
         ;;
         
     "PROBE")
+<<<<<<< audio-device-probing-datas-e28a7
+        # Simplified audio device probing
+        card=$(arecord -l | grep "card [0-9]:" | head -1 | sed 's/card \([0-9]*\).*/\1/')
+        device=$(arecord -l | grep "card $card" | grep "device [0-9]:" | head -1 | sed 's/device \([0-9]*\).*/\1/')
+        [ -z "$device" ] && device=0
+        inputhw="$card,$device"
+        
+        arecord_output=$(arecord -D "hw:$inputhw" --dump-hw-params 2>&1)
+        
+        max_channels=$(echo "$arecord_output" | grep "CHANNELS:" | grep -oE '[0-9]+' | tail -1)
+        bitformat=$(echo "$arecord_output" | grep "^FORMAT:" | awk '{print $NF}')
+        buffer_time_max=$(echo "$arecord_output" | grep "BUFFER_TIME:" | grep -oE '[0-9]+' | tail -1)
+        buffer_size_max=$(echo "$arecord_output" | grep "BUFFER_SIZE:" | grep -oE '[0-9]+' | tail -1)
+        max_rate=$(echo "$arecord_output" | grep "RATE:" | grep -oE '[0-9]+' | tail -1)
+        
+        [ "$max_rate" -gt 48000 ] 2>/dev/null && max_rate=48000
+        
+        echo "Card: $card"
+        echo "Device: $device"
+        echo "InputHW: $inputhw"
+        echo "Channels: $max_channels"
+        echo "Rate: $max_rate"
+        echo "Format: $bitformat"
+        echo "Buffer Time Max: $buffer_time_max"
+        echo "Buffer Size Max: $buffer_size_max"
+        ;;
+        
+=======
         if pgrep -f '/usr/sbin/recorder' >/dev/null 2>&1; then
             echo "WARNING: recorder is running, stop to probe !"
         else
@@ -104,6 +132,7 @@ case "$CMND" in
 
             echo "$card / $device ($max_channels channels - $max_rate Hz @ $bitformat)"
         ;;      
+>>>>>>> main
     *)
         echo "Unknown command: $CMND"
         echo "Valid commands: START, STOP, STATUS, PROBE"

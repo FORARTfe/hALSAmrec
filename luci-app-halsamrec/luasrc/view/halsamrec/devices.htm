@@ -1,0 +1,118 @@
+<%#
+Copyright 2025 HALSAmRec
+Licensed under the GNU General Public License v3.0
+-%>
+
+<%+header%>
+
+<div class="cbi-map">
+	<h2 name="content"><%:HALSAmRec Audio Devices%></h2>
+	<p><%:This page displays all available audio capture devices detected by arecord.%></p>
+
+	<fieldset class="cbi-section">
+		<legend><%:Device Information%></legend>
+		
+		<div id="device-status">
+			<p><em><%:Loading device information...%></em></p>
+		</div>
+
+		<div id="raw-output" style="margin-top: 20px; display: none;">
+			<h4><%:Raw arecord -l Output%></h4>
+			<pre id="raw-pre" style="background: #f5f5f5; padding: 10px; border: 1px solid #ddd; overflow-x: auto;"></pre>
+		</div>
+	</fieldset>
+
+	<div style="margin-top: 20px;">
+		<button class="cbi-button cbi-button-action" onclick="loadDevices()"><%:Refresh%></button>
+	</div>
+</div>
+
+<script type="text/javascript">
+//<![CDATA[
+	function loadDevices() {
+		var statusDiv = document.getElementById('device-status');
+		var rawOutputDiv = document.getElementById('raw-output');
+		var rawPre = document.getElementById('raw-pre');
+		
+		statusDiv.innerHTML = '<em>Loading device information...</em>';
+		
+		XHR.get('<%=controller%>/admin/services/halsamrec/probe', null,
+			function(x, data) {
+				if (data && data.devices && data.devices.length > 0) {
+					var html = '<table class="cbi-section-table">';
+					html += '<tr class="cbi-section-table-titles">';
+					html += '<th class="cbi-section-table-cell"><%:Card%></th>';
+					html += '<th class="cbi-section-table-cell"><%:Device%></th>';
+					html += '<th class="cbi-section-table-cell"><%:Name%></th>';
+					html += '<th class="cbi-section-table-cell"><%:Subdevices%></th>';
+					html += '</tr>';
+					
+					var currentCard = null;
+					var cardInfo = null;
+					
+					for (var i = 0; i < data.devices.length; i++) {
+						var line = data.devices[i];
+						
+						// Parse card lines: "card 0: USB-Audio [USB Audio] etc"
+						var cardMatch = line.match(/card\s+(\d+):\s+([^\[]+)\[([^\]]+)\]/);
+						if (cardMatch) {
+							if (currentCard !== null && cardInfo) {
+								html += '<tr class="cbi-section-table-row">';
+								html += '<td class="cbi-value-field">' + currentCard + '</td>';
+								html += '<td class="cbi-value-field">' + (cardInfo.device || '-') + '</td>';
+								html += '<td class="cbi-value-field">' + cardInfo.name + '</td>';
+								html += '<td class="cbi-value-field">' + (cardInfo.subdevices || '-') + '</td>';
+								html += '</tr>';
+							}
+							
+							currentCard = cardMatch[1];
+							cardInfo = {
+								name: cardMatch[2].trim() + ' [' + cardMatch[3] + ']',
+								device: null,
+								subdevices: null
+							};
+						}
+						
+						// Parse device lines: "  device 0: USB Audio [USB Audio] etc"
+						var deviceMatch = line.match(/^\s+device\s+(\d+):\s+([^\[]+)\[([^\]]+)\]/);
+						if (deviceMatch && currentCard !== null) {
+							cardInfo.device = deviceMatch[1];
+							cardInfo.subdevices = deviceMatch[2].trim();
+						}
+					}
+					
+					// Add last card
+					if (currentCard !== null && cardInfo) {
+						html += '<tr class="cbi-section-table-row">';
+						html += '<td class="cbi-value-field">' + currentCard + '</td>';
+						html += '<td class="cbi-value-field">' + (cardInfo.device || '-') + '</td>';
+						html += '<td class="cbi-value-field">' + cardInfo.name + '</td>';
+						html += '<td class="cbi-value-field">' + (cardInfo.subdevices || '-') + '</td>';
+						html += '</tr>';
+					}
+					
+					html += '</table>';
+					statusDiv.innerHTML = html;
+					
+					// Show raw output
+					rawPre.textContent = data.raw;
+					rawOutputDiv.style.display = 'block';
+				} else if (data && data.raw) {
+					statusDiv.innerHTML = '<p><%:No capture devices found or error occurred.%></p>';
+					rawPre.textContent = data.raw;
+					rawOutputDiv.style.display = 'block';
+				} else {
+					statusDiv.innerHTML = '<p><%:Unable to retrieve device information.%></p>';
+				}
+			}
+		);
+	}
+	
+	// Load devices on page load
+	document.addEventListener('DOMContentLoaded', function() {
+		loadDevices();
+	});
+//]]>
+</script>
+
+<%+footer%>
