@@ -10,7 +10,7 @@ function action_probe()
 	local sys = require "luci.sys"
 	local uci = require "luci.model.uci".cursor()
 	
-	-- Run arecord -l and capture all output
+	-- Run arecord to probe audio interface parameters
 	local devices_data = {}
 	local fp = io.popen("arecord --dump-hw-params -D hw:0,0 2>&1")
 	if fp then
