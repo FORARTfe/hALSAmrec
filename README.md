@@ -14,6 +14,6 @@ A customization of J. Bruce Fields' [openwrt-recording](https://github.com/bfiel
 
 ## :construction: Todo
 
-:white_square_button: audio interface specs remote access;
+:white_square_button: remote audio interface specs probing;
 
 :white_square_button: LuCi dedicated page.
