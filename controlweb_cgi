@@ -78,6 +78,7 @@ case "$CMND" in
             echo "WARNING: recorder is running, stop to probe !"
         else
             echo "$(arecord -l | grep -A 2 "List of CAPTURE Hardware Devices" | grep -A 1 "card [0-9]:" | head -n 3)"
+        fi
         ;;
 
     *)
