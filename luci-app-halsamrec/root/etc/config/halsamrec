@@ -1,2 +1,4 @@
 config halsamrec 'main'
 	option enabled '1'
+	option device 'hw:0,0'
+	option autostart '0'
