@@ -1,6 +1,6 @@
 include $(TOPDIR)/rules.mk
 
-LUCI_TITLE:=HALSAmRec Audio Devices LuCI Interface
+LUCI_TITLE:=Audio Device UI
 LUCI_DEPENDS:=+alsa-utils
 LUCI_PKGARCH:=all
 
