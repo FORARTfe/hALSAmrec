@@ -1,3 +1,43 @@
+# Audio Device Info LuCI Interface
+
+A dedicated LuCI web interface for viewing and managing audio capture devices on OpenWrt with recorder service control.
+
+## Features
+
+- **Recorder Service Control:** Start/Stop toggle button with real-time status display
+- **ALSA Hardware Probe:** Display detailed hardware parameters for `hw:0,0`
+- **Status Monitoring:** Real-time status display (RUNNING/STOPPED)
+- **Safety Warnings:** Prevents probing while recorder is running
+- **Auto-Refresh:** Status auto-updates every 3 seconds
+- **Clean Interface:** Integrated into main LuCI menu bar
+
+## Installation
+
+1. Copy the `luci-app-halsamrec` directory to your OpenWrt build system under `package/`
+2. Run `make menuconfig` and select:
+   - LuCI -> Collections -> luci-app-halsamrec
+3. Build the package with `make package/luci-app-halsamrec/compile`
+4. Install the generated `.ipk` package on your OpenWrt device
+
+## Usage
+
+After installation, navigate to:
+**Main Menu → Audio Devices**
+
+The page provides:
+- **Recorder Service Section:**
+  - Real-time status display (RUNNING/STOPPED with color coding)
+  - Toggle button to START/STOP recorder service
+  - Status messages for actions
+
+- **ALSA Device Probe Section:**
+  - Warning message when recorder is running (prevents probe)
+  - Probe button (disabled when recorder is running)
+  - Raw `arecord --dump-hw-params -D hw:0,0` output
+
+## Configuration
+
+Edit `/etc/config/halsamrec`:
 # Audio device info LuCI Interface
 
 A dedicated LuCI web interface for viewing audio capture devices on OpenWrt.
