@@ -38,6 +38,13 @@ The page provides:
 ## Configuration
 
 Edit `/etc/config/halsamrec`:
+
+config halsamrec 'main' option enabled '1' 
+# Enable/disable module option device 'hw:0,0' 
+# ALSA device (default: hw:0,0) option autostart '0' 
+# Auto-start recorder on boot
+
+
 # Audio device info LuCI Interface
 
 A dedicated LuCI web interface for viewing audio capture devices on OpenWrt.
