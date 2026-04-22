@@ -6,6 +6,193 @@ Licensed under the GNU General Public License v3.0
 <%+header%>
 
 <div class="cbi-map">
+	<h2 name="content"><%:Audio Devices%></h2>
+	<p><%:This page displays audio device parameters and recorder service status.%></p>
+
+	<!-- Service Control Section -->
+	<fieldset class="cbi-section">
+		<legend><%:Recorder Service%></legend>
+		
+		<div id="service-status" style="padding: 10px; background: #f5f5f5; border-radius: 3px; margin-bottom: 15px;">
+			<p><em><%:Loading service status...%></em></p>
+		</div>
+		
+		<div style="text-align: center;">
+			<button class="cbi-button cbi-button-action" id="btn-toggle" onclick="toggleRecorder()" style="padding: 8px 20px; font-size: 14px;">
+				<%:Toggle Recorder%>
+			</button>
+		</div>
+		<div id="service-message" style="margin-top: 10px; padding: 10px; border-radius: 3px; display: none;"></div>
+	</fieldset>
+
+	<!-- ALSA Device Probe Section -->
+	<fieldset class="cbi-section">
+		<legend><%:ALSA Device Probe (hw:0,0)%></legend>
+		
+		<div id="probe-warning" style="padding: 12px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 3px; color: #856404; display: none; margin-bottom: 15px;">
+			<strong>⚠ <%:Warning:%></strong> <%:Recorder is running, stop to probe!%>
+		</div>
+		
+		<div id="device-status" style="padding: 10px; background: #f5f5f5; border-radius: 3px;">
+			<p><em><%:Ready to probe. Click Probe button below.%></em></p>
+		</div>
+
+		<div id="raw-output" style="margin-top: 20px; display: none;">
+			<h4><%:Hardware Parameters Output%></h4>
+			<pre id="raw-pre" style="background: #f5f5f5; padding: 10px; border: 1px solid #ddd; overflow-x: auto; border-radius: 3px;"></pre>
+		</div>
+		
+		<div style="text-align: center; margin-top: 15px;">
+			<button class="cbi-button cbi-button-action" id="btn-probe" onclick="loadDevices()" style="padding: 8px 20px; font-size: 14px;">
+				<%:Probe%>
+			</button>
+		</div>
+	</fieldset>
+
+</div>
+
+<script type="text/javascript">
+//<![CDATA[
+	
+	// Service Control Functions
+	function checkServiceStatus() {
+		XHR.get('<%=controller%>/admin/halsamrec/service?action=status', null,
+			function(x, data) {
+				if (data && data.status !== undefined) {
+					updateServiceUI(data);
+					// Update probe button and warning based on status
+					updateProbeState(data.status);
+				}
+			}
+		);
+	}
+	
+	function toggleRecorder() {
+		var btnToggle = document.getElementById('btn-toggle');
+		btnToggle.disabled = true;
+		
+		// Determine current state and toggle
+		var statusDiv = document.getElementById('service-status');
+		var statusText = statusDiv.textContent || "";
+		var currentStatus = statusText.indexOf("RUNNING") !== -1 ? "running" : "stopped";
+		var action = currentStatus === "running" ? "stop" : "start";
+		
+		XHR.get('<%=controller%>/admin/halsamrec/service?action=' + action, null,
+			function(x, data) {
+				btnToggle.disabled = false;
+				if (data && data.status) {
+					showServiceMessage(data.message || "", data.status === "running" ? "success" : "info");
+					updateServiceUI(data);
+					updateProbeState(data.status);
+				}
+			}
+		);
+	}
+	
+	function updateServiceUI(data) {
+		var statusDiv = document.getElementById('service-status');
+		
+		if (!data || data.status === undefined) {
+			statusDiv.innerHTML = '<p style="color: red;"><strong><%:Failed to retrieve status.%></strong></p>';
+			return;
+		}
+		
+		var isRunning = data.status === "running";
+		var statusText = isRunning ? "RUNNING" : "STOPPED";
+		var statusColor = isRunning ? "green" : "red";
+		var statusSymbol = isRunning ? "▶" : "⏹";
+		
+		statusDiv.innerHTML = '<strong style="font-size: 16px; color: ' + statusColor + ';">' + statusSymbol + ' <%:Status:%> ' + statusText + '</strong>';
+	}
+	
+	function updateProbeState(status) {
+		var btnProbe = document.getElementById('btn-probe');
+		var probeWarning = document.getElementById('probe-warning');
+		var isRunning = status === "running";
+		
+		if (isRunning) {
+			// Disable probe button, show warning
+			btnProbe.disabled = true;
+			btnProbe.style.opacity = "0.5";
+			btnProbe.style.cursor = "not-allowed";
+			probeWarning.style.display = "block";
+		} else {
+			// Enable probe button, hide warning, clear output
+			btnProbe.disabled = false;
+			btnProbe.style.opacity = "1";
+			btnProbe.style.cursor = "pointer";
+			probeWarning.style.display = "none";
+			
+			// Clear previous probe output when recorder stops
+			var rawOutputDiv = document.getElementById('raw-output');
+			var deviceStatus = document.getElementById('device-status');
+			rawOutputDiv.style.display = "none";
+			deviceStatus.innerHTML = '<p><em><%:Ready to probe. Click Probe button below.%></em></p>';
+		}
+	}
+	
+	function showServiceMessage(msg, type) {
+		var msgDiv = document.getElementById('service-message');
+		msgDiv.textContent = msg;
+		msgDiv.style.display = 'block';
+		
+		if (type === "success") {
+			msgDiv.style.backgroundColor = "#d4edda";
+			msgDiv.style.borderLeft = "3px solid #28a745";
+			msgDiv.style.color = "#155724";
+		} else if (type === "error") {
+			msgDiv.style.backgroundColor = "#f8d7da";
+			msgDiv.style.borderLeft = "3px solid #dc3545";
+			msgDiv.style.color = "#721c24";
+		} else {
+			msgDiv.style.backgroundColor = "#d1ecf1";
+			msgDiv.style.borderLeft = "3px solid #17a2b8";
+			msgDiv.style.color = "#0c5460";
+		}
+		
+		// Auto-hide after 5 seconds
+		setTimeout(function() {
+			msgDiv.style.display = 'none';
+		}, 5000);
+	}
+	
+	function loadDevices() {
+		var statusDiv = document.getElementById('device-status');
+		var rawOutputDiv = document.getElementById('raw-output');
+		var rawPre = document.getElementById('raw-pre');
+		
+		statusDiv.innerHTML = '<em><%:Probing device...%></em>';
+		
+		XHR.get('<%=controller%>/admin/halsamrec/probe', null,
+			function(x, data) {
+				if (data && data.raw) {
+					statusDiv.innerHTML = '<p><%:Hardware parameters for hw:0,0:%></p>';
+					rawPre.textContent = data.raw;
+					rawOutputDiv.style.display = 'block';
+				} else {
+					statusDiv.innerHTML = '<p style="color: red;"><%:Unable to retrieve device information.%></p>';
+				}
+			}
+		);
+	}
+	
+	// Initialize on page load
+	document.addEventListener('DOMContentLoaded', function() {
+		checkServiceStatus();
+		// Refresh status every 3 seconds
+		setInterval(checkServiceStatus, 3000);
+	});
+//]]>
+</script>
+
+<%+footer%><%#
+Copyright 2026 F.O.R.A.R.T.
+Licensed under the GNU General Public License v3.0
+-%>
+
+<%+header%>
+
+<div class="cbi-map">
 	<h2 name="content"><%:Audio Device%></h2>
 	<p><%:Recording controls and device parameters%></p>
 
