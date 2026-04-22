@@ -1,11 +1,20 @@
 #!/bin/sh /etc/rc.common
 
 START=95
+USE_PROCD=1
 
 start() {
-	echo "ALSA device LuCI module initialized"
+	# LuCI module is passive; no service process needed
+	procd_open_service "halsamrec-luci"
+	procd_close_service
 }
 
 stop() {
-	echo "ALSA device LuCI module stopped"
+	# Cleanup (if any)
+	:
+}
+
+reload() {
+	# No reload needed for LuCI module
+	:
 }
