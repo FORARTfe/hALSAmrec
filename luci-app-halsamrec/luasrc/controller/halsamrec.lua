@@ -1,95 +1,83 @@
-module("luci.controller.halsamrec", package.seeall)
+module("luci.controller.ALSA", package.seeall)
 
 function index()
-	local page  = entry({"admin", "services", "halsamrec"}, alias("admin", "services", "halsamrec", "devices"), _("Audio Devices"), 10)
-	page.dependent = true
-	entry({"admin", "services", "halsamrec", "devices"}, template("halsamrec/devices"), _("Audio Devices"), 10)
-	entry({"admin", "services", "halsamrec", "status"}, call("action_status"), nil).leaf = true
-	entry({"admin", "services", "halsamrec", "start"}, call("action_recorder_start"), nil).leaf = true
-	entry({"admin", "services", "halsamrec", "stop"}, call("action_recorder_stop"), nil).leaf = true
+	-- Move menu to main bar (not under admin/services)
+	entry({"admin", "ALSA"}, alias("admin", "ALSA", "devices"), _("Audio Devices"), 60).dependent = true
+	entry({"admin", "ALSA", "devices"}, template("ALSA/devices"), _("Audio Devices"), 10)
+	entry({"admin", "ALSA", "probe"}, call("action_probe"), nil).leaf = true
+	entry({"admin", "ALSA", "service"}, call("action_service"), nil).leaf = true
 end
 
--- Query status: is recorder running? PID? arecord results? (or warning if recorder is running)
-function action_status()
+function action_probe()
 	local sys = require "luci.sys"
-	local http = require "luci.http"
-	-- 1. Recorder status
-	local pid = sys.exec("pgrep -f '/usr/sbin/recorder' | head -n1 | tr -d '\n'")
-	local running = (pid ~= nil and pid ~= "")
-
-	local arecord_output = ""
-	local arecord_error = nil
-	if running then
-		arecord_output = "WARNING: recorder is running, stop to probe!"
-		arecord_error = true
-	else
-		-- Only allow our hardcoded query
-		-- Don't allow user override!
-		local fp = io.popen("arecord --dump-hw-params -D hw:0,0 2>&1")
-		if fp then
-			arecord_output = fp:read("*all") or ""
-			fp:close()
-		else
-			arecord_output = "Failed to run arecord"
-			arecord_error = true
+	
+	-- Run arecord to probe audio interface parameters on hw:0,0
+	local devices_data = {}
+	local raw_output = ""
+	
+	local fp = io.popen("arecord --dump-hw-params -D hw:0,0 2>&1")
+	if fp then
+		raw_output = fp:read("*all") or ""
+		fp:close()
+		
+		-- Parse the output line by line
+		for line in raw_output:gmatch("[^\r\n]+") do
+			table.insert(devices_data, line)
 		end
 	end
-
-	http.prepare_content("application/json")
-	http.write_json({
-		recorder = {
-			running = running,
-			pid = running and pid or nil,
-		},
-		arecord = {
-			raw = arecord_output,
-			error = arecord_error or false
-		}
+	
+	luci.http.prepare_content("application/json")
+	luci.http.write_json({
+		raw = raw_output,
+		devices = devices_data
 	})
 end
 
--- Start recorder
-function action_recorder_start()
-	local sys = require "luci.sys"
+function action_service()
 	local http = require "luci.http"
-	local ok = false
-	local msg = ""
-	if sys.exec("pgrep -f '/usr/sbin/recorder' | head -n1 | tr -d '\n'") ~= "" then
-		ok = true
-		msg = "Already running"
-	else
-		local rc = sys.call("/etc/init.d/autorecorder start >/dev/null 2>&1")
-		luci.sys.exec("sleep 2")  -- Wait a short moment
-		if sys.exec("pgrep -f '/usr/sbin/recorder' | head -n1 | tr -d '\n'") ~= "" then
-			ok = true
-			msg = "Started successfully"
+	local sys = require "luci.sys"
+	
+	local action = http.getarg("action") or ""
+	local result = {}
+	
+	-- Whitelist valid actions
+	local valid_actions = {start=1, stop=1, status=1}
+	if not valid_actions[action] then
+		luci.http.status(400, "Bad Request")
+		luci.http.write_json({error = "Invalid action"})
+		return
+	end
+	
+	if action == "start" then
+		sys.call("/etc/init.d/autorecorder start >/dev/null 2>&1")
+		sys.call("sleep 1")
+		if sys.call("pgrep -f '/usr/sbin/recorder' >/dev/null 2>&1") == 0 then
+			result.status = "running"
+			result.message = "Started successfully"
 		else
-			msg = "Failed to start"
+			result.status = "stopped"
+			result.message = "Failed to start"
+		end
+		
+	elseif action == "stop" then
+		sys.call("/etc/init.d/autorecorder stop >/dev/null 2>&1")
+		sys.call("sleep 1")
+		if sys.call("pgrep -f '/usr/sbin/recorder' >/dev/null 2>&1") == 0 then
+			result.status = "running"
+			result.message = "Failed to stop"
+		else
+			result.status = "stopped"
+			result.message = "Stopped successfully"
+		end
+		
+	elseif action == "status" then
+		if sys.call("pgrep -f '/usr/sbin/recorder' >/dev/null 2>&1") == 0 then
+			result.status = "running"
+		else
+			result.status = "stopped"
 		end
 	end
-	http.prepare_content("application/json")
-	http.write_json({ success = ok, message = msg })
-end
-
--- Stop recorder
-function action_recorder_stop()
-	local sys = require "luci.sys"
-	local http = require "luci.http"
-	local ok = false
-	local msg = ""
-	if sys.exec("pgrep -f '/usr/sbin/recorder' | head -n1 | tr -d '\n'") == "" then
-		ok = true
-		msg = "Already stopped"
-	else
-		local rc = sys.call("/etc/init.d/autorecorder stop >/dev/null 2>&1")
-		luci.sys.exec("sleep 2")
-		if sys.exec("pgrep -f '/usr/sbin/recorder' | head -n1 | tr -d '\n'") == "" then
-			ok = true
-			msg = "Stopped successfully"
-		else
-			msg = "Failed to stop"
-		end
-	end
-	http.prepare_content("application/json")
-	http.write_json({ success = ok, message = msg })
+	
+	luci.http.prepare_content("application/json")
+	luci.http.write_json(result)
 end
