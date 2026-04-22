@@ -7,111 +7,111 @@ Licensed under the GNU General Public License v3.0
 
 <div class="cbi-map">
 	<h2 name="content"><%:Audio Devices%></h2>
-	<p><%:This page displays all available audio capture devices detected by arecord.%></p>
+	<p><%:This page shows ALSA device parameters and lets you control the multi-track recorder daemon.%></p>
 
 	<fieldset class="cbi-section">
-		<legend><%:Device Information%></legend>
-		
-		<div id="device-status">
-			<p><em><%:Loading device information...%></em></p>
+		<legend><%:Recorder Service%></legend>
+		<div id="recorder-status">
+			<em><%:Checking recorder status...%></em>
 		</div>
-
-		<div id="raw-output" style="margin-top: 20px; display: none;">
-			<h4><%:Raw arecord -l Output%></h4>
-			<pre id="raw-pre" style="background: #f5f5f5; padding: 10px; border: 1px solid #ddd; overflow-x: auto;"></pre>
+		<div style="margin-top:10px;">
+			<button id="recorder-action-btn" class="cbi-button cbi-button-action" style="display:none"></button>
+			<span id="recorder-action-msg" style="margin-left:1em;"></span>
 		</div>
 	</fieldset>
 
-	<div style="margin-top: 20px;">
-		<button class="cbi-button cbi-button-action" onclick="loadDevices()"><%:Refresh%></button>
+	<fieldset class="cbi-section" style="margin-top:18px;">
+		<legend><%:arecord --dump-hw-params%></legend>
+		<div id="arecord-status">
+			<em><%:Loading arecord output...%></em>
+		</div>
+		<div id="arecord-raw-output" style="margin-top: 20px;">
+			<pre id="arecord-raw-pre" style="background: #f5f5f5; padding: 10px; border: 1px solid #ddd; overflow-x: auto;"></pre>
+		</div>
+	</fieldset>
+	<div style="margin-top:20px;">
+		<button class="cbi-button cbi-button-action" onclick="loadStatus()"><%:Refresh%></button>
 	</div>
 </div>
 
 <script type="text/javascript">
 //<![CDATA[
-	function loadDevices() {
-		var statusDiv = document.getElementById('device-status');
-		var rawOutputDiv = document.getElementById('raw-output');
-		var rawPre = document.getElementById('raw-pre');
-		
-		statusDiv.innerHTML = '<em>Loading device information...</em>';
-		
-		XHR.get('<%=controller%>/admin/services/halsamrec/probe', null,
-			function(x, data) {
-				if (data && data.devices && data.devices.length > 0) {
-					var html = '<table class="cbi-section-table">';
-					html += '<tr class="cbi-section-table-titles">';
-					html += '<th class="cbi-section-table-cell"><%:Card%></th>';
-					html += '<th class="cbi-section-table-cell"><%:Device%></th>';
-					html += '<th class="cbi-section-table-cell"><%:Name%></th>';
-					html += '<th class="cbi-section-table-cell"><%:Subdevices%></th>';
-					html += '</tr>';
-					
-					var currentCard = null;
-					var cardInfo = null;
-					
-					for (var i = 0; i < data.devices.length; i++) {
-						var line = data.devices[i];
-						
-						// Parse card lines: "card 0: USB-Audio [USB Audio] etc"
-						var cardMatch = line.match(/card\s+(\d+):\s+([^\[]+)\[([^\]]+)\]/);
-						if (cardMatch) {
-							if (currentCard !== null && cardInfo) {
-								html += '<tr class="cbi-section-table-row">';
-								html += '<td class="cbi-value-field">' + currentCard + '</td>';
-								html += '<td class="cbi-value-field">' + (cardInfo.device || '-') + '</td>';
-								html += '<td class="cbi-value-field">' + cardInfo.name + '</td>';
-								html += '<td class="cbi-value-field">' + (cardInfo.subdevices || '-') + '</td>';
-								html += '</tr>';
-							}
-							
-							currentCard = cardMatch[1];
-							cardInfo = {
-								name: cardMatch[2].trim() + ' [' + cardMatch[3] + ']',
-								device: null,
-								subdevices: null
-							};
-						}
-						
-						// Parse device lines: "  device 0: USB Audio [USB Audio] etc"
-						var deviceMatch = line.match(/^\s+device\s+(\d+):\s+([^\[]+)\[([^\]]+)\]/);
-						if (deviceMatch && currentCard !== null) {
-							cardInfo.device = deviceMatch[1];
-							cardInfo.subdevices = deviceMatch[2].trim();
-						}
-					}
-					
-					// Add last card
-					if (currentCard !== null && cardInfo) {
-						html += '<tr class="cbi-section-table-row">';
-						html += '<td class="cbi-value-field">' + currentCard + '</td>';
-						html += '<td class="cbi-value-field">' + (cardInfo.device || '-') + '</td>';
-						html += '<td class="cbi-value-field">' + cardInfo.name + '</td>';
-						html += '<td class="cbi-value-field">' + (cardInfo.subdevices || '-') + '</td>';
-						html += '</tr>';
-					}
-					
-					html += '</table>';
-					statusDiv.innerHTML = html;
-					
-					// Show raw output
-					rawPre.textContent = data.raw;
-					rawOutputDiv.style.display = 'block';
-				} else if (data && data.raw) {
-					statusDiv.innerHTML = '<p><%:No capture devices found or error occurred.%></p>';
-					rawPre.textContent = data.raw;
-					rawOutputDiv.style.display = 'block';
-				} else {
-					statusDiv.innerHTML = '<p><%:Unable to retrieve device information.%></p>';
-				}
-			}
-		);
+function setRecorderStatus(status) {
+	var div = document.getElementById('recorder-status');
+	var btn = document.getElementById('recorder-action-btn');
+	var msg = document.getElementById('recorder-action-msg');
+	if (!status) {
+		div.innerHTML = '<span style="color:#f00"><%:Unknown/Not detected%></span>';
+		btn.style.display = 'none';
+		return;
 	}
-	
-	// Load devices on page load
-	document.addEventListener('DOMContentLoaded', function() {
-		loadDevices();
+	if (status.running) {
+		div.innerHTML = '<span style="color:#080">RUNNING</span>'  (status.pid ? ' (PID: '  status.pid  ')' : '');
+		btn.textContent = '<%:Stop%>';
+		btn.onclick = function() { recorderAction('stop'); };
+		btn.style.display = '';
+	} else {
+		div.innerHTML = '<span style="color:#800">STOPPED</span>';
+		btn.textContent = '<%:Start%>';
+		btn.onclick = function() { recorderAction('start'); };
+		btn.style.display = '';
+	}
+	msg.textContent = '';
+}
+function setArecordStatus(data) {
+	var div = document.getElementById('arecord-status');
+	var pre = document.getElementById('arecord-raw-pre');
+	if (!data) {
+		div.innerHTML = '<span style="color:#f00"><%:Error - no output%></span>';
+		pre.textContent = "";
+		return;
+	}
+	if (data.error) {
+		div.innerHTML = '<span style="color:#c80">'  data.raw  '</span>';
+		pre.textContent = "";
+	} else {
+		div.innerHTML = '<span style="color:#080"><%:Parameters retrieved%></span>';
+		pre.textContent = data.raw;
+	}
+}
+function loadStatus() {
+	var req = new XHR();
+	// Hide action feedback
+	document.getElementById('recorder-action-msg').textContent = '';
+	req.get('<%=controller%>/admin/services/halsamrec/status', null, function(x, data) {
+		if (data) {
+			setRecorderStatus(data.recorder);
+			setArecordStatus(data.arecord);
+		} else {
+			setRecorderStatus(null);
+			setArecordStatus(null);
+		}
 	});
+}
+function recorderAction(act) {
+	var btn = document.getElementById('recorder-action-btn');
+	var msg = document.getElementById('recorder-action-msg');
+	btn.disabled = true;
+	msg.textContent = '<%:Working...%>';
+	var url = (act == 'start')
+		? '<%=controller%>/admin/services/halsamrec/start'
+		: '<%=controller%>/admin/services/halsamrec/stop';
+	var req = new XHR();
+	req.get(url, null, function(x, data) {
+		if (data && typeof data.message === "string") {
+			msg.textContent = data.message;
+		} else {
+			msg.textContent = '<%:Unknown error%>';
+		}
+		btn.disabled = false;
+		// Auto refresh (with slight delay for procd state)
+		setTimeout(loadStatus, 1200);
+	});
+}
+// On-load
+document.addEventListener('DOMContentLoaded', function() {
+	loadStatus();
+});
 //]]>
 </script>
 
