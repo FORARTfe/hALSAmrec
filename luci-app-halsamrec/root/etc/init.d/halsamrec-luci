@@ -4,23 +4,4 @@
 START=95
 
 start() { return 0; }
-stop()  { return 0; }#!/bin/sh /etc/rc.common
-
-START=95
-USE_PROCD=1
-
-start() {
-	# LuCI module is passive; no service process needed
-	procd_open_service "halsamrec-luci"
-	procd_close_service
-}
-
-stop() {
-	# Cleanup (if any)
-	:
-}
-
-reload() {
-	# No reload needed for LuCI module
-	:
-}
+stop()  { return 0; }
