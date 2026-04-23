@@ -1,4 +1,10 @@
 #!/bin/sh /etc/rc.common
+# Passive registration — no daemon is managed by this init script
+
+START=95
+
+start() { return 0; }
+stop()  { return 0; }#!/bin/sh /etc/rc.common
 
 START=95
 USE_PROCD=1
