@@ -14,8 +14,6 @@ PACKAGES="alsa-utils kmod-usb-storage block-mount kmod-usb3 kmod-usb-audio usbut
 echo "[*] Updating package lists..."
 opkg update
 
-# opkg install is idempotent: packages already at current version are silently skipped.
-# This replaces the per-package loop and fixes the dead error-path under set -e.
 echo "[*] Installing required packages..."
 opkg install $PACKAGES
 
@@ -27,19 +25,24 @@ for f in recorder initscript hotplug controlweb_cgi; do
     wget -q "${BASE_URL}/${f}"
 done
 
+# ---------------------------------------------------------------------------
+# Install scripts
+# Note: 'install' is not part of busybox by default; use cp + chmod.
+# ---------------------------------------------------------------------------
 echo "[*] Installing scripts..."
-install -m 755 recorder           /usr/sbin/recorder
-install -m 755 initscript         /etc/init.d/autorecorder
+cp recorder           /usr/sbin/recorder           && chmod 755 /usr/sbin/recorder
+cp initscript         /etc/init.d/autorecorder      && chmod 755 /etc/init.d/autorecorder
+
 mkdir -p /etc/hotplug.d/block /etc/hotplug.d/usb
-install -m 644 hotplug            /etc/hotplug.d/block/autorecorder
-install -m 644 hotplug            /etc/hotplug.d/usb/autorecorder
+cp hotplug /etc/hotplug.d/block/autorecorder        && chmod 644 /etc/hotplug.d/block/autorecorder
+cp hotplug /etc/hotplug.d/usb/autorecorder          && chmod 644 /etc/hotplug.d/usb/autorecorder
 
 echo "[*] Enabling service..."
 /etc/init.d/autorecorder enable
 
 echo "[*] Setting up CGI web interface..."
 mkdir -p /www/cgi-bin
-install -m 755 controlweb_cgi     /www/cgi-bin/cm
+cp controlweb_cgi /www/cgi-bin/cm                   && chmod 755 /www/cgi-bin/cm
 
 LAN_IP=$(uci get network.lan.ipaddr 2>/dev/null || echo '<your-ip>')
 echo "[*] Web interface ready:"
@@ -50,6 +53,21 @@ done
 echo "[*] Cleaning up..."
 cd /; rm -rf "$TMPDIR"
 echo "[*] Installation complete!"
+
+echo ""
+printf "Install the LuCI web interface (ALSA → Audio Devices menu)? [y/N]: "
+read luci_answer
+case "$luci_answer" in
+    [yY]*)
+        wget -q -O /tmp/luci-installer.sh "${BASE_URL}/luci-installer.sh"
+        [ -s /tmp/luci-installer.sh ] || { echo "Error: failed to download LuCI installer."; }
+        sh /tmp/luci-installer.sh
+        rm -f /tmp/luci-installer.sh
+        ;;
+    *)
+        echo "LuCI app skipped. Run luci-installer.sh separately if needed."
+        ;;
+esac
 
 echo ""
 printf "A reboot is recommended. Reboot now? [y/N]: "
