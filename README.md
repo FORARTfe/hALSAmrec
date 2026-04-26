@@ -10,7 +10,7 @@ A customization of J. Bruce Fields' [openwrt-recording](https://github.com/bfiel
 
 :white_check_mark: remote - webcommand - start/stop/status/probe (using [Home App for Android™](https://github.com/Domi04151309/HomeApp#readme) too);
 
-:white_check_mark: automated tracks splitting (on Windows too).
+:white_check_mark: automated tracks splitting script (on Windows too).
 
 ## :construction: Todo
 
