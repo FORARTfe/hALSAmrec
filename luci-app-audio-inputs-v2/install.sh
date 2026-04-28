@@ -9,8 +9,8 @@
 
 set -e
 
-REPO="YOUR_USER/YOUR_REPO"
-BASE_URL="https://raw.githubusercontent.com/${REPO}/main/files"
+REPO="FORARTfe/hALSAmrec"
+BASE_URL="https://raw.githubusercontent.com/${REPO}/main/luci-app-audio-inputs-v2"
 TMPDIR="/tmp/audio-inputs-install.$$"
 
 # ── Version detection (identical logic to halsamrec installer) ──────────────
