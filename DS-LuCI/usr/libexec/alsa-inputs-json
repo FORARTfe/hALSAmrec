@@ -1,0 +1,71 @@
+#!/bin/sh
+# ALSA input devices → strict JSON array
+# Requires: /proc/asound, arecord (optional)
+# Output: [{"card":0,"device":0,"name":"…","hw_id":"hw:0,0","capture":true},…]
+
+set -e
+
+if [ -x /usr/bin/arecord ] && arecord -l 2>/dev/null | grep -q 'List of CAPTURE'; then
+    arecord -l 2>/dev/null | awk '
+    BEGIN {
+        print "["
+        first = 1
+    }
+    /^card [0-9]+:/ {
+        if (match($0, /^card ([0-9]+): (.+?) \[([^\]]+)\], device ([0-9]+): (.+?) \[([^\]]+)\]/, m)) {
+            card_num = m[1]
+            dev_name = m[6]
+            hw_id    = "hw:" card_num "," m[4]
+
+            gsub(/\\/, "\\\\", dev_name)
+            gsub(/"/, "\\\"", dev_name)
+            gsub(/\n/, "\\n", dev_name)
+
+            if (!first) printf ",\n"
+            first = 0
+            printf "  {\"card\": %d, \"device\": %d, \"name\": \"%s\", \"hw_id\": \"%s\", \"capture\": true}",
+                card_num, m[4], dev_name, hw_id
+        }
+    }
+    END { print "\n]" }
+    '
+else
+    if [ ! -d /proc/asound ]; then
+        echo '[]'
+        exit 0
+    fi
+
+    awk '
+    BEGIN {
+        while ((getline < "/proc/asound/cards") > 0) {
+            if (match($0, /^ *([0-9]+) \[.*\] *: .* - (.*)/, arr)) {
+                card_num = arr[1]
+                name = arr[2]
+                gsub(/^ +| +$/, "", name)
+                cards[card_num] = name
+            }
+        }
+        close("/proc/asound/cards")
+
+        print "["
+        first = 1
+        while ((getline < "/proc/asound/devices") > 0) {
+            if ($0 ~ /capture/) {
+                if (match($0, /^ *[0-9]+: \[ *([0-9]+)- *([0-9]+)\]/, arr)) {
+                    c = arr[1]
+                    d = arr[2]
+                    name = (c in cards) ? cards[c] : "Unknown"
+                    hw_id = "hw:" c "," d
+
+                    gsub(/\\/, "\\\\", name); gsub(/"/, "\\\"", name)
+                    if (!first) printf ",\n"
+                    first = 0
+                    printf "  {\"card\": %d, \"device\": %d, \"name\": \"%s\", \"hw_id\": \"%s\", \"capture\": true}",
+                        c, d, name, hw_id
+                }
+            }
+        }
+        close("/proc/asound/devices")
+        print "\n]"
+    }'
+fi
