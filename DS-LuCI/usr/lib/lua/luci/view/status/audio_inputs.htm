@@ -1,0 +1,66 @@
+<%# Copyright 2026 – Licensed under GPLv3 -%>
+<%+header%>
+
+<h2><%:Audio Inputs%></h2>
+<p><%:Live list of all detected ALSA capture devices.%></p>
+
+<table id="devtable" border="1" style="width:100%; border-collapse:collapse;">
+  <thead>
+    <tr>
+      <th><%:Card%></th>
+      <th><%:Device%></th>
+      <th><%:Name%></th>
+      <th><%:Hardware ID%></th>
+      <th><%:Capture%></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td colspan="5"><em><%:Loading…%></em></td></tr>
+  </tbody>
+</table>
+
+<script>
+(function() {
+  'use strict';
+  var tbody = document.querySelector('#devtable tbody');
+
+  function fetchDevices() {
+    fetch('<%=luci.dispatcher.build_url("admin/status/audio_inputs/list")%>')
+      .then(function(r) {
+        if (!r.ok) throw new Error('Bad response');
+        return r.json();
+      })
+      .then(function(devices) {
+        if (!Array.isArray(devices) || devices.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5"><%:No audio input devices found.%></td></tr>';
+          return;
+        }
+        var rows = devices.map(function(d) {
+          return '<tr>' +
+            '<td>' + d.card + '</td>' +
+            '<td>' + d.device + '</td>' +
+            '<td>' + luci_eschtml(d.name) + '</td>' +
+            '<td>' + luci_eschtml(d.hw_id) + '</td>' +
+            '<td>' + (d.capture ? '<%:Yes%>' : '<%:No%>') + '</td>' +
+            '</tr>';
+        });
+        tbody.innerHTML = rows.join('');
+      })
+      .catch(function() {
+        tbody.innerHTML = '<tr><td colspan="5"><%:Error fetching device list.%></td></tr>';
+      });
+  }
+
+  // Helper: escape HTML entities (available in LuCI template context)
+  function luci_eschtml(s) {
+    var d = document.createElement('div');
+    d.appendChild(document.createTextNode(s));
+    return d.innerHTML;
+  }
+
+  fetchDevices();
+  setInterval(fetchDevices, 1500);   // refresh every 1.5 seconds
+})();
+</script>
+
+<%+footer%>
