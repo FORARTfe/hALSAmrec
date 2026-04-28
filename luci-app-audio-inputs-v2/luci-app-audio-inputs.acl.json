@@ -1,0 +1,14 @@
+{
+  "luci-app-audio-inputs": {
+    "description": "Grant access to ALSA capture device list",
+    "read": {
+      "file": {
+        "/usr/libexec/alsa-inputs-json": [ "exec" ]
+      },
+      "ubus": {
+        "luci-rpc": [ "getNetworkDevices" ],
+        "file":     [ "exec" ]
+      }
+    }
+  }
+}
