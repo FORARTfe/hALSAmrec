@@ -1,0 +1,10 @@
+{
+    "admin/status/audio_inputs": {
+        "title": "Audio Inputs",
+        "order": 80,
+        "action": {
+            "type": "view",
+            "path": "status/audio_inputs"
+        }
+    }
+}
