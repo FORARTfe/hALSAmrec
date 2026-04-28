@@ -3,27 +3,46 @@
 # luci-app-audio-inputs installer
 # Runs directly on the OpenWrt router (no scp/rsync needed):
 #
-#   wget -qO- https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/luci-app-audio-inputs-v2 | sh
+#   wget -qO- https://raw.githubusercontent.com/YOUR/REPO/main/install.sh | sh
 #
 # GPL v3 — https://www.gnu.org/licenses/
 
 set -e
 
-BASE_URL="https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/luci-app-audio-inputs-v2"
+REPO="FORARTfe/hALSAmrec"
+BASE_URL="https://raw.githubusercontent.com/${REPO}/main/luci-app-audio-inputs-v2"
 TMPDIR="/tmp/audio-inputs-install.$$"
 
 # ── Version detection ────────────────────────────────────────────────────────
-# NEW_LUCI=1  →  OpenWrt v21+ (JS/RPCd LuCI, menu.d JSON, view modules)
+# NEW_LUCI=1  →  OpenWrt v21+ (JS/RPCd LuCI, menu.d, view modules)
 # NEW_LUCI=0  →  OpenWrt pre-v21 (classic Lua MVC LuCI)
+#
+# Fix 1: strip BOTH quote styles (' and ") from the release line before
+#         parsing — OpenWrt 21..23 used double-quotes, 24.x uses single-quotes.
+#         Using cut -d'"' -f2 alone yields an empty VER on 24.x firmware,
+#         which then falls through to NEW_LUCI=0 incorrectly.
+# Fix 2: use a proper if/then/else instead of '&& X || Y', which is NOT
+#         equivalent to if/else in POSIX sh.
 detect_version() {
     if [ ! -f /etc/openwrt_release ]; then
         NEW_LUCI=1; VER="unknown (assuming modern)"; return
     fi
-    VER=$(grep DISTRIB_RELEASE /etc/openwrt_release | cut -d'"' -f2)
+    # Strip both ' and " so the value is bare regardless of firmware version
+    VER=$(grep 'DISTRIB_RELEASE' /etc/openwrt_release \
+          | tr -d '"'"'" \
+          | cut -d'=' -f2)
     case "$VER" in
-        SNAPSHOT|r[0-9]*) NEW_LUCI=1 ;;
-        *) MAJOR=$(echo "$VER" | cut -d'.' -f1)
-           [ "$MAJOR" -ge 21 ] 2>/dev/null && NEW_LUCI=1 || NEW_LUCI=0 ;;
+        SNAPSHOT|r[0-9]*)
+            NEW_LUCI=1
+            ;;
+        *)
+            MAJOR=$(echo "$VER" | cut -d'.' -f1)
+            if [ -n "$MAJOR" ] && [ "$MAJOR" -ge 21 ] 2>/dev/null; then
+                NEW_LUCI=1
+            else
+                NEW_LUCI=0
+            fi
+            ;;
     esac
     echo "[*] OpenWrt ${VER} — $([ "$NEW_LUCI" -eq 1 ] && echo 'modern (v21+)' || echo 'legacy (pre-v21)') LuCI layout"
 }
