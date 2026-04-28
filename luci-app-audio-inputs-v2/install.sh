@@ -44,13 +44,13 @@ echo "[*] Downloading files..."
 mkdir -p "$TMPDIR" && cd "$TMPDIR"
 
 wget -q -O alsa-inputs-json \
-    "${BASE_URL}/usr/libexec/alsa-inputs-json"
+    "${BASE_URL}/alsa-inputs-json"
 wget -q -O audio_inputs.lua \
-    "${BASE_URL}/usr/lib/lua/luci/controller/status/audio_inputs.lua"
+    "${BASE_URL}/audio_inputs.lua"
 wget -q -O audio_inputs.htm \
-    "${BASE_URL}/usr/lib/lua/luci/view/status/audio_inputs.htm"
+    "${BASE_URL}/audio_inputs.htm"
 [ "$NEW_LUCI" -eq 1 ] && wget -q -O menu.json \
-    "${BASE_URL}/usr/share/luci/menu.d/luci-app-audio-inputs.json"
+    "${BASE_URL}/luci-app-audio-inputs.json"
 
 for f in alsa-inputs-json audio_inputs.lua audio_inputs.htm; do
     [ -s "$f" ] || { echo "[!] Download failed: $f"; cd /; rm -rf "$TMPDIR"; exit 1; }
