@@ -1,116 +1,137 @@
 <%#
-  Status → Audio Inputs  —  live ALSA capture device table
-  Polls /admin/status/audio_inputs/list every 1.5 s via XHR.get.
+Copyright 2026 F.O.R.A.R.T.
+Licensed under the GNU General Public License v3.0
 -%>
 <%+header%>
 
-<style>
-#ai-status{padding:4px 10px;margin-bottom:8px;border-left:3px solid #4a90d9;
-    background:rgba(74,144,217,.07);border-radius:2px;font-size:.85em;color:#555}
-#ai-status.ok  {border-color:#4caf50;background:rgba(76,175,80,.07);color:#2e7d32}
-#ai-status.warn{border-color:#ff9800;background:rgba(255,152,0,.07);color:#e65100}
-#ai-status.err {border-color:#f44336;background:rgba(244,67,54,.07);color:#b71c1c}
-.ai-yes{display:inline-block;padding:1px 8px;border-radius:10px;font-size:.8em;
-    font-weight:600;background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7}
-.ai-no {display:inline-block;padding:1px 8px;border-radius:10px;font-size:.8em;
-    font-weight:600;background:#fce4ec;color:#c62828;border:1px solid #ef9a9a}
-.ai-hw {font-family:monospace;font-size:.9em;background:#f5f5f5;
-    padding:1px 5px;border-radius:3px;border:1px solid #ddd}
-</style>
+<h2><%:Audio Inputs%></h2>
+<p><%:Stop the recorder first, then click Probe Devices. Start the recorder again when done.%></p>
 
-<div class="cbi-map">
-    <h2 name="content">&#127897; <%:Audio Inputs%></h2>
-    <p><%:Live list of ALSA capture devices. Refreshes every 1.5 seconds.%></p>
-
-    <div id="ai-status"><%:Initialising&hellip;%></div>
-
-    <table class="table cbi-section-table" id="ai-table">
-        <thead><tr class="tr table-titles">
-            <th class="th center" style="width:6%"><%:Card%></th>
-            <th class="th center" style="width:6%"><%:Dev%></th>
-            <th class="th" style="width:24%"><%:Card Name%></th>
-            <th class="th" style="width:40%"><%:Stream Name%></th>
-            <th class="th center" style="width:12%"><%:HW ID%></th>
-            <th class="th center" style="width:12%"><%:Capture%></th>
-        </tr></thead>
-        <tbody id="ai-tbody">
-            <tr class="tr"><td class="td" colspan="6"><em><%:Loading&hellip;%></em></td></tr>
-        </tbody>
-    </table>
-
-    <p style="margin-top:12px;font-size:.82em;color:#888">
-        <%:Source:%> <code>/proc/asound</code> &amp; <code>arecord -l</code>.
-        <%:Plug in a USB audio device and it will appear within 2 seconds.%>
-    </p>
+<!-- Service status bar -->
+<div id="svc-bar" style="margin-bottom:1em">
+  <strong><%:Recorder:&nbsp;%></strong>
+  <span id="svc-status"><%:Loading...%></span>
+  &nbsp;
+  <button id="btn-stop"  onclick="svcAction('stop')"  disabled><%:Stop%></button>
+  <button id="btn-start" onclick="svcAction('start')" disabled><%:Start%></button>
 </div>
+
+<!-- Device table -->
+<table class="table" id="dev-table">
+  <thead>
+    <tr class="tr table-titles">
+      <th class="th"><%:Card%></th>
+      <th class="th"><%:Dev%></th>
+      <th class="th"><%:Card Name%></th>
+      <th class="th"><%:Stream Name%></th>
+      <th class="th"><%:HW ID%></th>
+      <th class="th"><%:Capture%></th>
+    </tr>
+  </thead>
+  <tbody id="dev-tbody">
+    <tr class="tr"><td class="td" colspan="6"><%:—%></td></tr>
+  </tbody>
+</table>
+
+<!-- Probe button -->
+<div style="margin-top:1em">
+  <button id="btn-probe" onclick="runProbe()" disabled><%:Probe Devices%></button>
+  <span id="probe-msg" style="margin-left:1em"></span>
+</div>
+
+<p style="margin-top:1em;font-size:0.9em;color:#888">
+  <%:Source:%> <code>arecord -l</code> / <code>/proc/asound</code>.
+</p>
 
 <script type="text/javascript">
 //<![CDATA[
-var _last = null;
 
-function setStatus(cls, msg) {
-    var el = document.getElementById('ai-status');
-    el.className = cls;
-    el.innerHTML = msg;
+var BASE = "<%=luci.dispatcher.build_url('admin','status','audio_inputs')%>";
+
+function $(id){ return document.getElementById(id); }
+
+/* ── apply service status to UI ──────────────────────────────────────── */
+function setStatus(st) {
+    var el = $('svc-status');
+    el.textContent = st.charAt(0).toUpperCase() + st.slice(1);
+    el.style.color = (st === 'running') ? '#080' : (st === 'stopped' ? '#c00' : '#888');
+    $('btn-stop').disabled  = (st !== 'running');
+    $('btn-start').disabled = (st !== 'stopped');
+    /* Probe only available when recorder is confirmed stopped */
+    $('btn-probe').disabled = (st !== 'stopped');
 }
 
-function renderRows(devs) {
-    var tbody = document.getElementById('ai-tbody');
-    var s = '';
-    for (var i = 0; i < devs.length; i++) {
-        var d = devs[i];
-        s += '<tr class="tr">' +
-             '<td class="td center">'  + d.card   + '</td>' +
-             '<td class="td center">'  + d.device  + '</td>' +
-             '<td class="td">'         + esc(d.card_name || '\u2014') + '</td>' +
-             '<td class="td">'         + esc(d.name      || '\u2014') + '</td>' +
-             '<td class="td center"><code class="ai-hw">' + esc(d.hw_id) + '</code></td>' +
-             '<td class="td center"><span class="' + (d.capture ? 'ai-yes' : 'ai-no') + '">' +
-                 (d.capture ? '&#10004; <%:Yes%>' : '&#10008; <%:No%>') + '</span></td>' +
-             '</tr>';
+/* ── render device table ─────────────────────────────────────────────── */
+function renderTable(devices) {
+    var tbody = $('dev-tbody');
+    if (!Array.isArray(devices) || devices.length === 0) {
+        tbody.innerHTML = '<tr class="tr"><td class="td" colspan="6"><%:No ALSA capture devices found.%></td></tr>';
+        return;
     }
-    tbody.innerHTML = s || '<tr class="tr"><td class="td" colspan="6"><em><%:No capture devices found.%></em></td></tr>';
+    tbody.innerHTML = devices.map(function(d){
+        return '<tr class="tr">' +
+            '<td class="td">'       + (d.card        || '') + '</td>' +
+            '<td class="td">'       + (d.device      || '') + '</td>' +
+            '<td class="td">'       + (d.card_name   || '') + '</td>' +
+            '<td class="td">'       + (d.name        || '') + '</td>' +
+            '<td class="td"><code>' + (d.hw_id       || '') + '</code></td>' +
+            '<td class="td">'       + (d.capture ? '&#10003;' : '') + '</td>' +
+        '</tr>';
+    }).join('');
 }
 
-function esc(s) {
-    return String(s)
-        .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+/* ── XHR helper ──────────────────────────────────────────────────────── */
+function xhrGet(url, cb) {
+    var x = new XMLHttpRequest();
+    x.open('GET', url, true);
+    x.onreadystatechange = function(){
+        if (x.readyState === 4) cb(x.status, x.responseText);
+    };
+    x.send();
 }
 
-function poll() {
-    XHR.get('<%=controller%>/admin/status/audio_inputs/list', null,
-        function(xhr, data) {
-            if (!data) {
-                setStatus('err', '<%:Request failed. Check rpcd/uhttpd.%>');
-                return;
-            }
-            if (data.error) {
-                setStatus('warn', '&#9888; ' + esc(data.error));
-                document.getElementById('ai-tbody').innerHTML =
-                    '<tr class="tr"><td class="td" colspan="6"><em>' + esc(data.error) + '</em></td></tr>';
-                return;
-            }
-            if (!Array.isArray(data)) {
-                setStatus('err', '<%:Unexpected response.%>');
-                return;
-            }
-            var sig = JSON.stringify(data);
-            if (sig !== _last) {
-                _last = sig;
-                renderRows(data);
-            }
-            var n = data.length;
-            setStatus('ok', '&#9679; <%:Found%> ' + n +
-                ' <%:capture device(s). Updated:%> ' + (new Date()).toLocaleTimeString());
+/* ── service stop / start ────────────────────────────────────────────── */
+function svcAction(action) {
+    $('btn-stop').disabled = $('btn-start').disabled =
+        $('btn-probe').disabled = true;
+    $('svc-status').textContent = '<%:Working\u2026%>';
+    xhrGet(BASE + '/service?action=' + action, function(status, txt){
+        try { setStatus(JSON.parse(txt).status); }
+        catch(e) { setStatus('unknown'); }
+    });
+}
+
+/* ── probe ───────────────────────────────────────────────────────────── */
+// Simply calls /list. The backend returns HTTP 409 if the recorder is
+// still running, so there is no automatic stop/start here — that is
+// entirely the user's responsibility via the Stop/Start buttons.
+function runProbe() {
+    $('btn-probe').disabled = true;
+    var msg = $('probe-msg');
+    msg.textContent = '<%:Probing\u2026%>';
+
+    xhrGet(BASE + '/list', function(status, txt){
+        if (status === 409) {
+            msg.textContent = '<%:Error: recorder is still running. Stop it first.%>';
+            $('btn-probe').disabled = false;
+            return;
         }
-    );
+        try {
+            renderTable(JSON.parse(txt));
+            msg.textContent = '<%:Done.%>';
+        } catch(e) {
+            msg.textContent = '<%:Probe failed.%>';
+        }
+        $('btn-probe').disabled = false;
+    });
 }
 
-document.addEventListener('DOMContentLoaded', function() {
-    poll();
-    setInterval(poll, 1500);
+/* ── init: fetch current service status ──────────────────────────────── */
+xhrGet(BASE + '/service?action=status', function(status, txt){
+    try { setStatus(JSON.parse(txt).status); }
+    catch(e) { setStatus('unknown'); }
 });
+
 //]]>
 </script>
 
