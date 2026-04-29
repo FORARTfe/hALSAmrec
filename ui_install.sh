@@ -9,8 +9,7 @@
 
 set -e
 
-REPO="FORARTfe/hALSAmrec"
-BASE_URL="https://raw.githubusercontent.com/${REPO}/main/luci-app-audio-inputs-v2"
+BASE_URL="https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/luci-app-audio-inputs-v2"
 TMPDIR="/tmp/audio-inputs-install.$$"
 
 # ── Version detection ────────────────────────────────────────────────────────
