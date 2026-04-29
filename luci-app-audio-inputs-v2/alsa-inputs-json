@@ -1,27 +1,19 @@
 #!/bin/sh
-# /usr/libexec/alsa-inputs-json
-# Output: JSON array of ALSA capture devices.
-# Parsing: arecord -l (preferred) → /proc/asound fallback.
-# BusyBox sh + awk. No Python/Node/jq.
-
 emit_arecord() {
     arecord -l 2>/dev/null | awk '
 BEGIN { print "["; first=1 }
 /^card [0-9]+:/ {
-    # card 0: Generic [HD-Audio Generic], device 0: ... [ALC269VC Analog]
     n = split($0, tok, /[,\[\]]+/)
-    card_num = substr(tok[1], 6)   # "card 0" → "0"
-    card_name = tok[2]; gsub(/^ +| +$/, "", card_name)
-    dev_num  = substr(tok[4], 9)   # " device 0" → "0"
-    gsub(/^ +| +$/, "", dev_num)
-    dev_name = tok[6]; gsub(/^ +| +$/, "", dev_name)
-    hw_id = "hw:" card_num "," dev_num
-    gsub(/\\/, "\\\\", dev_name);  gsub(/"/, "\\\"", dev_name)
-    gsub(/\\/, "\\\\", card_name); gsub(/"/, "\\\"", card_name)
+    card_num  = substr(tok[1], 6);  gsub(/^ +| +$/, "", card_num)
+    card_name = tok[2];             gsub(/^ +| +$/, "", card_name)
+    dev_num   = substr(tok[4], 9);  gsub(/^ +| +$/, "", dev_num)
+    dev_name  = tok[6];             gsub(/^ +| +$/, "", dev_name)
+    gsub(/\\/, "\\\\", dev_name);   gsub(/"/, "\\\"", dev_name)
+    gsub(/\\/, "\\\\", card_name);  gsub(/"/, "\\\"", card_name)
     if (!first) printf ",\n"
     first = 0
-    printf "  {\"card\":%d,\"device\":%d,\"card_name\":\"%s\",\"name\":\"%s\",\"hw_id\":\"%s\",\"capture\":true}",
-        card_num+0, dev_num+0, card_name, dev_name, hw_id
+    printf "  {\"card\":%d,\"device\":%d,\"card_name\":\"%s\",\"name\":\"%s\",\"hw_id\":\"hw:%d,%d\",\"capture\":true}",
+        card_num+0, dev_num+0, card_name, dev_name, card_num+0, dev_num+0
 }
 END { print "\n]" }
 '
@@ -32,41 +24,30 @@ emit_proc() {
 BEGIN {
     while ((getline line < "/proc/asound/cards") > 0) {
         if (split(line, a, /[\[\]]+/) >= 2) {
-            n = a[1]+0
-            short = a[2]; gsub(/^ +| +$/, "", short)
-            cards[n] = short
+            n = a[1]+0; sh = a[2]; gsub(/^ +| +$/, "", sh); cards[n] = sh
         }
     }
     close("/proc/asound/cards")
     while ((getline line < "/proc/asound/pcm") > 0) {
-        if (line ~ /capture/ && split(line, b, /[-: ]+/) >= 3) {
+        if (line ~ /capture/) {
+            split(line, b, /[-:]+/)
             k = b[1]+0 "," b[2]+0
-            nm = ""; for (i=3;i<=NF;i++) nm = nm (i>3?" ":"") $i
-            # re-parse with getline for cleaner name
-            n2 = split(line, c, /: /)
-            nm2 = (n2 >= 2) ? c[2] : cards[b[1]+0]
-            gsub(/^ +| +$/, "", nm2)
-            # strip trailing " : playback..." part
-            sub(/ *:.*/, "", nm2)
-            pcm[k] = nm2
-            cap[k] = 1
+            nm = b[3]; gsub(/^ +| +$/, "", nm); sub(/ *:.*/, "", nm)
+            pcm[k] = nm; cap[k] = 1
         }
     }
     close("/proc/asound/pcm")
     while ((getline line < "/proc/asound/devices") > 0) {
-        if (line ~ /capture/ && match(line, /\[ *([0-9]+)- *([0-9]+)\]/, arr)) {
+        if (line ~ /capture/ && match(line, /\[ *([0-9]+)- *([0-9]+)\]/, arr))
             cap[arr[1]+0 "," arr[2]+0] = 1
-        }
     }
     close("/proc/asound/devices")
     print "["
     first = 1
     for (k in cap) {
-        split(k, p, ",")
-        cn = p[1]+0; dn = p[2]+0
-        cn_s = cn""
-        cname = (cn_s in cards) ? cards[cn_s] : "card"cn
-        dname = (k in pcm) ? pcm[k] : cname
+        split(k, p, ","); cn = p[1]+0; dn = p[2]+0
+        cname = (cn in cards) ? cards[cn] : "card"cn
+        dname = (k in pcm)   ? pcm[k]   : cname
         gsub(/\\/, "\\\\", cname); gsub(/"/, "\\\"", cname)
         gsub(/\\/, "\\\\", dname); gsub(/"/, "\\\"", dname)
         if (!first) printf ",\n"
@@ -75,8 +56,7 @@ BEGIN {
             cn, dn, cname, dname, cn, dn
     }
     print "\n]"
-}
-'
+}'
 }
 
 [ -d /proc/asound ] || { printf '{"error":"ALSA not found"}\n'; exit 0; }

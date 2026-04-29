@@ -3,7 +3,7 @@
     "title": "Audio Inputs",
     "order": 80,
     "action": {
-      "type": "view",
+      "type": "template",
       "path": "status/audio_inputs"
     }
   }
