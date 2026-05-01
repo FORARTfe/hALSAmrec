@@ -1,7 +1,7 @@
 #!/bin/sh
 #
 # Original script by J. Bruce Fields, 2024
-# This version (v2) by FORART (https://forart.it/), 2025
+# This version (v3) by FORART (https://forart.it/), 2025-26
 # GPL v3 — see <https://www.gnu.org/licenses/>
 
 MNT=/tmp/mnt
