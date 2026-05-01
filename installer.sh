@@ -44,32 +44,19 @@ mkdir -p /www/cgi-bin
 cp controlweb_cgi /www/cgi-bin/cm                   && chmod 755 /www/cgi-bin/cm
 
 LAN_IP=$(uci get network.lan.ipaddr 2>/dev/null || echo '<your-ip>')
-echo "[*] Web interface ready:"
+echo "[*] Web interface ready. Available commands:"
 for cmd in START STOP STATUS PROBE; do
-    echo "  ${cmd} - http://${LAN_IP}/cgi-bin/cm?cmnd=${cmd}"
+    echo "- http://${LAN_IP}/cgi-bin/cm?cmnd=${cmd}"
 done
 
 echo "[*] Cleaning up..."
 cd /; rm -rf "$TMPDIR"
 echo "[*] Installation complete!"
 
-echo ""
-printf "Install the LuCI web interface (ALSA → Audio Devices menu)? [y/N]: "
-read luci_answer
-case "$luci_answer" in
-    [yY]*)
-        wget -q -O /tmp/luci-installer.sh "${BASE_URL}/luci-installer.sh"
-        [ -s /tmp/luci-installer.sh ] || { echo "Error: failed to download LuCI installer."; }
-        sh /tmp/luci-installer.sh
-        rm -f /tmp/luci-installer.sh
-        ;;
-    *)
-        echo "LuCI app skipped. Run luci-installer.sh separately if needed."
-        ;;
 esac
 
 echo ""
-printf "A reboot is recommended. Reboot now? [y/N]: "
+printf "A reboot is recommended. Reboot device now? [y/N]: "
 read answer
 case "$answer" in
     [yY]*) echo "Rebooting..."; reboot ;;
