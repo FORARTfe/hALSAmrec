@@ -1,7 +1,7 @@
 #!/bin/sh
 #
-# hALSAmrec installer
-# by FORART (https://forart.it/), 2025
+# hALSAmrec installer v2
+# by FORART (https://forart.it/), 2025-26
 # GPL v3 — see <https://www.gnu.org/licenses/>
 
 set -e
