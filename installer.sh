@@ -16,7 +16,7 @@ opkg update
 echo "[*] Installing required packages..."
 opkg install $PACKAGES
 
-echo "[*] Downloading latest files from ${REPO}..."
+echo "[*] Downloading latest script version..."
 mkdir -p "$TMPDIR"
 cd "$TMPDIR"
 
