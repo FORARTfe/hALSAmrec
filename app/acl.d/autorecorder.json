@@ -1,0 +1,15 @@
+{
+    "luci-app-autorecorder": {
+        "description": "Grant access to ALSA Recorder controls",
+        "read": {
+            "ubus": {
+                "autorecorder": [ "status", "probe" ]
+            }
+        },
+        "write": {
+            "ubus": {
+                "autorecorder": [ "start", "stop" ]
+            }
+        }
+    }
+}
