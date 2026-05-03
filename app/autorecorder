@@ -1,0 +1,83 @@
+#!/bin/sh
+#
+# rpcd plugin for hALSAmrec autorecorder
+# by FORART (https://forart.it/), 2025-26
+# GPL v3 — see <https://www.gnu.org/licenses/>
+#
+# Exposes four ubus methods: status, start, stop, probe
+# Install: copy to /usr/libexec/rpcd/autorecorder, chmod +x, restart rpcd
+
+RECORDER=/usr/sbin/recorder
+INIT=/etc/init.d/autorecorder
+
+is_running() { pgrep -f "$RECORDER" >/dev/null 2>&1; }
+
+# Escape a string for embedding inside a JSON double-quoted value.
+# Handles backslash, double-quote, and newlines. No awk, no subshell loop.
+json_str() {
+    printf '%s' "$1" \
+        | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g' \
+        | tr '\n' '\001' \
+        | sed 's/\001/\\n/g'
+}
+
+case "$1" in
+    list)
+        printf '{"status":{},"start":{},"stop":{},"probe":{}}\n'
+        ;;
+
+    call)
+        case "$2" in
+            status)
+                if is_running; then
+                    pid=$(pgrep -f "$RECORDER" | head -n 1)
+                    printf '{"running":true,"pid":%s}\n' "$pid"
+                else
+                    printf '{"running":false,"pid":0}\n'
+                fi
+                ;;
+
+            start)
+                if is_running; then
+                    printf '{"result":"already_running"}\n'
+                else
+                    "$INIT" start >/dev/null 2>&1
+                    sleep 2
+                    if is_running; then
+                        printf '{"result":"started"}\n'
+                    else
+                        printf '{"result":"failed"}\n'
+                    fi
+                fi
+                ;;
+
+            stop)
+                if ! is_running; then
+                    printf '{"result":"already_stopped"}\n'
+                else
+                    "$INIT" stop >/dev/null 2>&1
+                    sleep 2
+                    if is_running; then
+                        printf '{"result":"failed"}\n'
+                    else
+                        printf '{"result":"stopped"}\n'
+                    fi
+                fi
+                ;;
+
+            probe)
+                if is_running; then
+                    printf '{"error":"recorder_running","output":""}\n'
+                else
+                    raw=$(arecord -D "hw:0,0" --dump-hw-params 2>&1)
+                    out=$(json_str "$raw")
+                    printf '{"error":"","output":"%s"}\n' "$out"
+                fi
+                ;;
+
+            *)
+                printf '{"error":"unknown_method"}\n'
+                ;;
+        esac
+        ;;
+esac
