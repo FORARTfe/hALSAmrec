@@ -11,7 +11,7 @@ opkg update >/dev/null 2>&1 || true
 
 echo "[*] Installing required packages..."
 # Using the extended package list from v2 installer[cite: 5]
-opkg install alsa-utils block-mount kmod-usb-storage kmod-usb-audio usbutils kmod-fs-exfat
+opkg install alsa-utils kmod-usb-storage block-mount kmod-usb3 kmod-usb-audio usbutils kmod-fs-exfat
 
 # ── 2. Write v3 Recorder Script[cite: 4] ──────────────────────────────────────
 echo "[*] Writing recorder script..."
