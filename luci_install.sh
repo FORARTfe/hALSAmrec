@@ -2,17 +2,11 @@
 #
 # install-autorecorder.sh — hALSAmrec v4 installer
 # by FORART (https://forart.it/), 2025-26
+# Fixed & Refined for OpenWrt Compatibility
 # GPL v3 — see <https://www.gnu.org/licenses/>
 #
 # Single-file self-contained installer.
 # All runtime files are embedded as heredocs.
-#
-# Usage:
-#   scp install-autorecorder.sh root@192.168.1.1:/tmp/
-#   ssh root@192.168.1.1 sh /tmp/install-autorecorder.sh
-#
-# Supports: OpenWrt 21.x / 22.x / 23.x
-# Idempotent: safe to run multiple times.
 
 set -e
 
@@ -50,7 +44,6 @@ else
 fi
 
 STEP "Installing required packages"
-# block-mount provides blkid; kmod-fs-exfat for exFAT kernel support
 opkg install alsa-utils block-mount kmod-usb-storage kmod-fs-exfat || \
     ERR "Package installation failed — check feed availability"
 OK "Packages installed"
@@ -65,12 +58,6 @@ cat > /usr/sbin/recorder << 'ENDOFFILE'
 # Original script by J. Bruce Fields, 2024
 # This version (v4) by FORART (https://forart.it/), 2025-26
 # GPL v3 — see <https://www.gnu.org/licenses/>
-#
-# Changes from v3:
-#   - blkid replaces dd|grep EXFAT — more reliable, handles VFAT edge cases
-#   - UCI-persisted card/device: eliminates arecord -l from the hot loop
-#     on stable hardware; auto-persists on first successful detection
-#   - mount point is also read from UCI (autorecorder.config.mount)
 
 uci_get() { uci -q get "autorecorder.config.$1" 2>/dev/null; }
 
@@ -79,30 +66,25 @@ MNT="${MNT:-/tmp/mnt}"
 recorder=""
 
 trap 'true' SIGHUP
+trap 'kill $recorder 2>/dev/null; umount -l "$MNT" 2>/dev/null; exit' SIGTERM
 
-sleep infinity &
-dummy=$!
-
-trap 'kill $dummy
-      [ -n "$recorder" ] && kill $recorder
-      umount -l "$MNT"
-      exit' SIGTERM
-
-first=0
+first=1
 
 while true; do
-    if [ $first -eq 0 ]; then
-        first=1
+    if [ "$first" -eq 1 ]; then
+        first=0
+    elif [ -n "$recorder" ] && kill -0 "$recorder" 2>/dev/null; then
+        wait "$recorder" 2>/dev/null || true
+        recorder=""
     else
-        wait ${recorder:-$dummy}
+        sleep 5 &
+        wait $! 2>/dev/null || true
     fi
 
-    # Re-read mount point each cycle in case UCI was updated
     MNT=$(uci_get mount)
     MNT="${MNT:-/tmp/mnt}"
 
-    # ── Audio card detection ───────────────────────────────────────────────────
-    # Use UCI-persisted card/device if available — skips arecord -l entirely
+    # ── Audio card detection ──────────────────────────────────────────────────
     card_num=$(uci_get card)
     dev_num=$(uci_get device)
 
@@ -120,7 +102,6 @@ while true; do
     fi
 
     # ── Disk detection ────────────────────────────────────────────────────────
-    # blkid replaces the brittle dd|grep EXFAT approach
     disk="" exfat_count=0
     while read -r _maj _min _blk name; do
         case "$name" in sd*|mmcblk*|nvme*)
@@ -138,14 +119,14 @@ while true; do
     # ── Stale PID cleanup ─────────────────────────────────────────────────────
     if [ -n "$recorder" ] && [ ! -e "/proc/$recorder" ]; then
         recorder=""
-        umount -l "$MNT"
+        umount -l "$MNT" 2>/dev/null || true
     fi
 
     # ── Readiness check ───────────────────────────────────────────────────────
     if [ -z "$disk" ] || [ "$card_ready" -eq 0 ]; then
         if [ -n "$recorder" ]; then
-            kill -9 $recorder
-            umount -l "$MNT"
+            kill -9 $recorder 2>/dev/null || true
+            umount -l "$MNT" 2>/dev/null || true
             recorder=""
         fi
         continue
@@ -154,13 +135,13 @@ while true; do
     [ -n "$recorder" ] && continue
 
     mkdir -p "$MNT"
-    mount "$disk" "$MNT" || continue
+    mountpoint -q "$MNT" || mount "$disk" "$MNT" || continue
 
     # ── Disk space check ──────────────────────────────────────────────────────
-    set -- $(df -k "$MNT" | tail -n 1)
-    if [ $(($4 / 1024)) -le 100 ]; then
-        umount -l "$MNT"
-        sleep 5
+    avail=$(df -k "$MNT" | awk 'NR>1 {print $(NF-2); exit}')
+    if [ "${avail:-0}" -lt 102400 ]; then
+        umount -l "$MNT" 2>/dev/null || true
+        sleep 5 & wait $! 2>/dev/null || true
         continue
     fi
 
@@ -177,7 +158,7 @@ while true; do
     max_rate=$(printf '%s\n' "$arecord_out" | sed -n 's/^RATE:.*[\[(]\([0-9]*\) \([0-9]*\)[])].*/\2/p')
     [ -z "$max_rate" ] && \
         max_rate=$(printf '%s\n' "$arecord_out" | sed -n 's/^RATE:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
-    [ "$max_rate" -gt 48000 ] && max_rate=48000
+    [ "${max_rate:-0}" -gt 48000 ] && max_rate=48000
 
     buf_time=$(printf '%s\n' "$arecord_out" | sed -n 's/^BUFFER_TIME:.*[\[(]\([0-9]*\) \([0-9]*\)[])].*/\2/p')
     buf_size=$(printf '%s\n' "$arecord_out" | sed -n 's/^BUFFER_SIZE:.*[\[(]\([0-9]*\) \([0-9]*\)[])].*/\2/p')
@@ -192,12 +173,12 @@ while true; do
 
     # ── Start recording ───────────────────────────────────────────────────────
     arecord --device="hw:${card_num},${dev_num}" \
-        --channels="$max_ch"      \
+        --channels="${max_ch:-2}" \
         --file-type=raw           \
-        --format="$bitfmt"        \
-        --rate="$max_rate"        \
-        --buffer-time="$buf_time" \
-        --buffer-size="$buf_size" \
+        --format="${bitfmt:-S16_LE}" \
+        --rate="${max_rate:-44100}"  \
+        --buffer-time="${buf_time:-500000}" \
+        --buffer-size="${buf_size:-16384}" \
         > "${MNT}/$(date +%s)_${max_ch}-${max_rate}-${bitfmt}.raw" 2>/dev/null &
 
     recorder=$!
@@ -208,11 +189,6 @@ OK "/usr/sbin/recorder"
 # ── /etc/init.d/autorecorder ──────────────────────────────────────────────────
 cat > /etc/init.d/autorecorder << 'ENDOFFILE'
 #!/bin/sh /etc/rc.common
-#
-# autorecorder procd init script
-# by FORART (https://forart.it/), 2025-26
-# GPL v3 — see <https://www.gnu.org/licenses/>
-
 START=99
 STOP=1
 USE_PROCD=1
@@ -245,38 +221,33 @@ OK "/etc/hotplug.d/block/50-autorecorder"
 mkdir -p /usr/libexec/rpcd
 cat > /usr/libexec/rpcd/autorecorder << 'ENDOFFILE'
 #!/bin/sh
-#
 # rpcd shell plugin for hALSAmrec autorecorder
-# by FORART (https://forart.it/), 2025-26
-# GPL v3 — see <https://www.gnu.org/licenses/>
 
 RECORDER=/usr/sbin/recorder
 INIT=/etc/init.d/autorecorder
 MNT_DEFAULT=/tmp/mnt
 
 is_running() { pgrep -f "$RECORDER" >/dev/null 2>&1; }
-
 uci_get() { uci -q get "autorecorder.config.$1" 2>/dev/null; }
 
 json_str() {
     printf '%s' "$1" \
         | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g' \
         | tr '\n' '\001' \
-        | sed 's/\001/\\n/g'
+        | sed 's/\001/\\\\n/g'
 }
 
 case "$1" in
     list)
-        printf '{"status":{},"start":{},"stop":{},"probe":{},"disk_status":{},"get_config":{},"set_config":{"card":"","device":"","mount":""}}\n'
+        printf '{"status":{},"start":{},"stop":{},"probe":{},"disk_status":{},"get_config":{},"set_config":{"card":"string","device":"string","mount":"string"}}\n'
         ;;
 
     call)
         case "$2" in
-
             status)
                 if is_running; then
                     pid=$(pgrep -f "$RECORDER" | head -n 1)
-                    printf '{"running":true,"pid":%s}\n' "$pid"
+                    printf '{"running":true,"pid":%s}\n' "${pid:-0}"
                 else
                     printf '{"running":false,"pid":0}\n'
                 fi
@@ -325,9 +296,11 @@ case "$1" in
             disk_status)
                 mnt=$(uci_get mount); mnt="${mnt:-$MNT_DEFAULT}"
                 if mountpoint -q "$mnt" 2>/dev/null; then
-                    set -- $(df -k "$mnt" | tail -n 1)
+                    vals=$(df -k "$mnt" | awk 'NR>1 {print $(NF-4), $(NF-3), $(NF-2); exit}')
+                    set -- $vals
+                    total="${1:-0}"; used="${2:-0}"; avail="${3:-0}"
                     printf '{"mounted":true,"total_kb":%s,"used_kb":%s,"avail_kb":%s,"mount":"%s"}\n' \
-                        "$2" "$3" "$4" "$mnt"
+                        "$total" "$used" "$avail" "$mnt"
                 else
                     printf '{"mounted":false,"total_kb":0,"used_kb":0,"avail_kb":0,"mount":"%s"}\n' "$mnt"
                 fi
@@ -433,20 +406,19 @@ var callSetConfig = rpc.declare({
 });
 
 return view.extend({
-
     load: function() {
         return Promise.all([
-            callStatus(),
-            callDiskStatus(),
-            callGetConfig()
+            callStatus().catch(function() { return { running: false, pid: 0 }; }),
+            callDiskStatus().catch(function() { return { mounted: false, total_kb: 0, used_kb: 0, avail_kb: 0, mount: '' }; }),
+            callGetConfig().catch(function() { return { card: '', device: '', mount: '' }; })
         ]);
     },
 
     render: function(data) {
         var self   = this;
-        var status = data[0];
-        var disk   = data[1];
-        var config = data[2];
+        var status = data[0] || {};
+        var disk   = data[1] || {};
+        var config = data[2] || {};
 
         var btnStart = E('button', {
             'class': 'btn cbi-button cbi-button-apply',
@@ -514,9 +486,7 @@ return view.extend({
         });
 
         var page = E('div', { 'class': 'cbi-map' }, [
-
             E('h2', _('ALSA Recorder')),
-
             E('div', { 'class': 'cbi-section' }, [
                 E('h3', _('Service')),
                 E('div', { 'class': 'cbi-section-descr' },
@@ -586,11 +556,18 @@ return view.extend({
         ]);
 
         poll.add(function() {
-            return Promise.all([callStatus(), callDiskStatus()]).then(function(results) {
-                var sc = document.getElementById('ar-status-cell');
-                var dc = document.getElementById('ar-disk-cell');
-                if (sc) dom.content(sc, self._statusBadge(results[0]));
-                if (dc) dom.content(dc, self._diskInfo(results[1]));
+            return Promise.all([
+                callStatus().catch(function() { return null; }), 
+                callDiskStatus().catch(function() { return null; })
+            ]).then(function(results) {
+                if (results[0]) {
+                    var sc = document.getElementById('ar-status-cell');
+                    if (sc) dom.content(sc, self._statusBadge(results[0]));
+                }
+                if (results[1]) {
+                    var dc = document.getElementById('ar-disk-cell');
+                    if (dc) dom.content(dc, self._diskInfo(results[1]));
+                }
             });
         }, 5);
 
@@ -783,11 +760,6 @@ ENDOFFILE
 OK "/usr/share/rpcd/acl.d/autorecorder.json"
 
 # -- /etc/config/autorecorder ------------------------------------------------
-# Written as a plain text file -- no uci calls required or used.
-# A UCI config file is just text; writing it directly is unambiguous on every
-# OpenWrt version and avoids the "Entry not found" error that uci commit emits
-# on 24.x when the package does not yet exist in its staging area.
-# Guard preserves any existing settings (card/device already auto-detected).
 if [ -f /etc/config/autorecorder ]; then
     OK "/etc/config/autorecorder (already exists -- preserving settings)"
 else
@@ -800,7 +772,6 @@ ENDOFCFG
     OK "/etc/config/autorecorder"
 fi
 
-
 # ── 3. Permissions ────────────────────────────────────────────────────────────
 STEP "Setting permissions"
 chmod 0755 /usr/sbin/recorder
@@ -812,13 +783,12 @@ chmod 0644 /usr/share/luci/menu.d/autorecorder.json
 chmod 0644 /usr/share/rpcd/acl.d/autorecorder.json
 OK "Permissions set"
 
-
-# ── 5. Enable service ─────────────────────────────────────────────────────────
+# ── 4. Enable service ─────────────────────────────────────────────────────────
 STEP "Enabling autorecorder service"
 /etc/init.d/autorecorder enable
 OK "Autorecorder enabled (will start on next boot)"
 
-# ── 6. Restart rpcd ───────────────────────────────────────────────────────────
+# ── 5. Restart rpcd ───────────────────────────────────────────────────────────
 STEP "Restarting rpcd"
 /etc/init.d/rpcd restart
 sleep 1
@@ -830,12 +800,12 @@ else
     WARN "rpcd restart done but 'ubus list autorecorder' not found yet — try: /etc/init.d/rpcd restart"
 fi
 
-# ── 7. Clear LuCI caches ──────────────────────────────────────────────────────
+# ── 6. Clear LuCI caches ──────────────────────────────────────────────────────
 STEP "Clearing LuCI caches"
 rm -f /tmp/luci-indexcache* /tmp/luci-modulecache* 2>/dev/null || true
 OK "LuCI caches cleared"
 
-# ── 8. Summary ────────────────────────────────────────────────────────────────
+# ── 7. Summary ────────────────────────────────────────────────────────────────
 printf "\n${BOLD}${GREEN}══════════════════════════════════════════════${RESET}\n"
 printf "${BOLD}${GREEN}  Installation complete!${RESET}\n"
 printf "${BOLD}${GREEN}══════════════════════════════════════════════${RESET}\n"
@@ -845,11 +815,4 @@ printf "  ${BOLD}Start${RESET}  →  /etc/init.d/autorecorder start\n"
 printf "  ${BOLD}Verify${RESET} →  ubus call autorecorder status\n"
 printf "         →  ubus call autorecorder disk_status\n"
 printf "         →  ubus call autorecorder get_config\n"
-printf "\n"
-printf "  ${YELLOW}Note:${RESET} Card/device indices will be auto-detected and persisted\n"
-printf "  to UCI on first successful recording cycle.\n"
-printf "  Override manually via LuCI or:\n"
-printf "    uci set autorecorder.config.card=0\n"
-printf "    uci set autorecorder.config.device=0\n"
-printf "    uci commit autorecorder\n"
 printf "\n"
