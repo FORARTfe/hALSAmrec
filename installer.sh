@@ -53,8 +53,6 @@ echo "[*] Cleaning up..."
 cd /; rm -rf "$TMPDIR"
 echo "[*] Installation complete!"
 
-esac
-
 echo ""
 printf "A reboot is recommended. Reboot device now? [y/N]: "
 read answer
