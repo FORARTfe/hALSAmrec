@@ -782,6 +782,25 @@ cat > /usr/share/rpcd/acl.d/autorecorder.json << 'ENDOFFILE'
 ENDOFFILE
 OK "/usr/share/rpcd/acl.d/autorecorder.json"
 
+# -- /etc/config/autorecorder ------------------------------------------------
+# Written as a plain text file -- no uci calls required or used.
+# A UCI config file is just text; writing it directly is unambiguous on every
+# OpenWrt version and avoids the "Entry not found" error that uci commit emits
+# on 24.x when the package does not yet exist in its staging area.
+# Guard preserves any existing settings (card/device already auto-detected).
+if [ -f /etc/config/autorecorder ]; then
+    OK "/etc/config/autorecorder (already exists -- preserving settings)"
+else
+    cat > /etc/config/autorecorder << 'ENDOFCFG'
+config autorecorder 'config'
+	option card ''
+	option device ''
+	option mount '/tmp/mnt'
+ENDOFCFG
+    OK "/etc/config/autorecorder"
+fi
+
+
 # ── 3. Permissions ────────────────────────────────────────────────────────────
 STEP "Setting permissions"
 chmod 0755 /usr/sbin/recorder
@@ -793,15 +812,6 @@ chmod 0644 /usr/share/luci/menu.d/autorecorder.json
 chmod 0644 /usr/share/rpcd/acl.d/autorecorder.json
 OK "Permissions set"
 
-# ── 4. UCI config ─────────────────────────────────────────────────────────────
-STEP "Initialising UCI configuration"
-if uci -q get autorecorder.config >/dev/null 2>&1; then
-    OK "UCI config already exists — preserving existing settings"
-else
-    uci set autorecorder.config=autorecorder
-    uci commit autorecorder
-    OK "Created /etc/config/autorecorder (card/device will be auto-detected)"
-fi
 
 # ── 5. Enable service ─────────────────────────────────────────────────────────
 STEP "Enabling autorecorder service"
