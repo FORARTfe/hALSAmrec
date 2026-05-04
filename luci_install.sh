@@ -1,12 +1,11 @@
 #!/bin/sh
 #
-# install-autorecorder.sh — hALSAmrec v4 installer
+# install-autorecorder.sh — hALSAmrec installer (v3 backend)
 # by FORART (https://forart.it/), 2025-26
-# Fixed & Refined for OpenWrt Compatibility
 # GPL v3 — see <https://www.gnu.org/licenses/>
 #
 # Single-file self-contained installer.
-# All runtime files are embedded as heredocs.
+# Embeds the flawlessly working v3 backend scripts.
 
 set -e
 
@@ -25,15 +24,11 @@ ERR()  { printf "  ${RED}✗ %s${RESET}\n" "$1"; exit 1; }
 
 # ── 0. Pre-flight checks ──────────────────────────────────────────────────────
 STEP "Pre-flight checks"
-
 [ "$(id -u)" -eq 0 ] || ERR "Must be run as root"
 [ -f /etc/openwrt_release ] || ERR "Not an OpenWrt system"
 
 OPENWRT_VER=$(. /etc/openwrt_release && printf '%s' "$DISTRIB_RELEASE")
 OK "OpenWrt $OPENWRT_VER detected"
-
-command -v opkg >/dev/null 2>&1 || ERR "opkg not found"
-OK "opkg available"
 
 # ── 1. Dependencies ───────────────────────────────────────────────────────────
 STEP "Updating package list"
@@ -56,77 +51,60 @@ cat > /usr/sbin/recorder << 'ENDOFFILE'
 #!/bin/sh
 #
 # Original script by J. Bruce Fields, 2024
-# This version (v4) by FORART (https://forart.it/), 2025-26
+# This version (v3) by FORART (https://forart.it/), 2025-26
 # GPL v3 — see <https://www.gnu.org/licenses/>
 
-uci_get() { uci -q get "autorecorder.config.$1" 2>/dev/null; }
-
-MNT=$(uci_get mount)
-MNT="${MNT:-/tmp/mnt}"
+MNT=/tmp/mnt
 recorder=""
 
 trap 'true' SIGHUP
-trap 'kill $recorder 2>/dev/null; umount -l "$MNT" 2>/dev/null; exit' SIGTERM
 
-first=1
+sleep infinity &
+dummy=$!
+
+trap 'kill $dummy
+      [ -n "$recorder" ] && kill $recorder
+      umount -l "$MNT"
+      exit' SIGTERM
+
+first=0
 
 while true; do
-    if [ "$first" -eq 1 ]; then
-        first=0
-    elif [ -n "$recorder" ] && kill -0 "$recorder" 2>/dev/null; then
-        wait "$recorder" 2>/dev/null || true
-        recorder=""
+    if [ $first -eq 0 ]; then
+        first=1
     else
-        sleep 5 &
-        wait $! 2>/dev/null || true
+        # Use recorder PID if active, otherwise wait on the sentinel sleep
+        wait ${recorder:-$dummy}
     fi
 
-    MNT=$(uci_get mount)
-    MNT="${MNT:-/tmp/mnt}"
+    # Single arecord call: result reused for readiness check and number parsing
+    card_line=$(arecord -l 2>/dev/null | grep '^card' | head -n 1)
 
-    # ── Audio card detection ──────────────────────────────────────────────────
-    card_num=$(uci_get card)
-    dev_num=$(uci_get device)
-
-    if [ -n "$card_num" ] && [ -n "$dev_num" ]; then
-        card_ready=1
-    else
-        card_line=$(arecord -l 2>/dev/null | grep '^card' | head -n 1)
-        if [ -n "$card_line" ]; then
-            card_num=$(printf '%s\n' "$card_line" | sed 's/^card \([0-9]*\):.*/\1/')
-            dev_num=$(printf '%s\n'  "$card_line" | sed 's/.*device \([0-9]*\):.*/\1/')
-            card_ready=1
-        else
-            card_num="" dev_num="" card_ready=0
-        fi
-    fi
-
-    # ── Disk detection ────────────────────────────────────────────────────────
+    # Detect the single exFAT partition on the system
     disk="" exfat_count=0
     while read -r _maj _min _blk name; do
         case "$name" in sd*|mmcblk*|nvme*)
             dev="/dev/$name"
             [ -b "$dev" ] || continue
-            type=$(blkid -o value -s TYPE "$dev" 2>/dev/null)
-            case "$type" in [Ee][Xx][Ff][Aa][Tt])
+            if dd if="$dev" bs=1 skip=3 count=5 2>/dev/null | grep -q "EXFAT"; then
                 exfat_count=$((exfat_count + 1))
                 disk="$dev"
-            esac
+            fi
         esac
     done < /proc/partitions
     [ "$exfat_count" -ne 1 ] && disk=""
 
-    # ── Stale PID cleanup ─────────────────────────────────────────────────────
+    # Stale PID check: clean up if recorder exited on its own
     if [ -n "$recorder" ] && [ ! -e "/proc/$recorder" ]; then
         recorder=""
-        umount -l "$MNT" 2>/dev/null || true
+        umount -l "$MNT"
     fi
 
-    # ── Readiness check ───────────────────────────────────────────────────────
-    if [ -z "$disk" ] || [ "$card_ready" -eq 0 ]; then
+    # Not ready: disk or audio card missing
+    if [ -z "$disk" ] || [ -z "$card_line" ]; then
         if [ -n "$recorder" ]; then
-            kill -9 $recorder 2>/dev/null || true
-            umount -l "$MNT" 2>/dev/null || true
+            umount -l "$MNT"
+            kill -9 $recorder
             recorder=""
         fi
         continue
@@ -135,60 +113,59 @@ while true; do
     [ -n "$recorder" ] && continue
 
     mkdir -p "$MNT"
-    mountpoint -q "$MNT" || mount "$disk" "$MNT" || continue
+    mount "$disk" "$MNT" || continue
 
-    # ── Disk space check ──────────────────────────────────────────────────────
-    avail=$(df -k "$MNT" | awk 'NR>1 {print $(NF-2); exit}')
-    if [ "${avail:-0}" -lt 102400 ]; then
-        umount -l "$MNT" 2>/dev/null || true
-        sleep 5 & wait $! 2>/dev/null || true
+    # Require at least 100 MB free before starting a new recording
+    set -- $(df -k "$MNT" | tail -n 1)
+    if [ $(($4 / 1024)) -le 100 ]; then
+        umount -l "$MNT"
+        sleep 5
         continue
     fi
 
-    # ── Hardware parameter detection ──────────────────────────────────────────
+    # Parse card/device numbers from the already-captured arecord -l output
+    card_num=$(printf '%s\n' "$card_line" | sed 's/^card \([0-9]*\):.*/\1/')
+    dev_num=$( printf '%s\n' "$card_line" | sed 's/.*device \([0-9]*\):.*/\1/')
+
     arecord_out=$(arecord -D "hw:${card_num},${dev_num}" --dump-hw-params 2>&1)
 
+    # Max channels: upper bound of range [min max], fallback to single value
     max_ch=$(printf '%s\n' "$arecord_out" | sed -n 's/^CHANNELS:.*\[\([0-9]*\) \([0-9]*\)\].*/\2/p')
     [ -z "$max_ch" ] && \
         max_ch=$(printf '%s\n' "$arecord_out" | sed -n 's/^CHANNELS:[[:space:]]*\[*\([0-9][0-9]*\).*/\1/p')
 
+    # Format: last listed format token — ${var##* } replaces awk '{print $NF}'
     fmt_raw=$(printf '%s\n' "$arecord_out" | sed -n 's/^FORMAT:[[:space:]]*//p' | head -n 1)
     bitfmt="${fmt_raw##* }"
 
+    # Max sample rate: upper bound of range, capped at 48000
     max_rate=$(printf '%s\n' "$arecord_out" | sed -n 's/^RATE:.*[\[(]\([0-9]*\) \([0-9]*\)[])].*/\2/p')
     [ -z "$max_rate" ] && \
         max_rate=$(printf '%s\n' "$arecord_out" | sed -n 's/^RATE:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
-    [ "${max_rate:-0}" -gt 48000 ] && max_rate=48000
+    [ "$max_rate" -gt 48000 ] && max_rate=48000
 
+    # Buffer parameters
     buf_time=$(printf '%s\n' "$arecord_out" | sed -n 's/^BUFFER_TIME:.*[\[(]\([0-9]*\) \([0-9]*\)[])].*/\2/p')
     buf_size=$(printf '%s\n' "$arecord_out" | sed -n 's/^BUFFER_SIZE:.*[\[(]\([0-9]*\) \([0-9]*\)[])].*/\2/p')
 
-    # ── Auto-persist detected card/device to UCI ──────────────────────────────
-    if [ "$card_ready" -eq 1 ] && [ -z "$(uci_get card)" ]; then
-        uci -q set autorecorder.config=autorecorder
-        uci -q set autorecorder.config.card="$card_num"
-        uci -q set autorecorder.config.device="$dev_num"
-        uci -q commit autorecorder
-    fi
-
-    # ── Start recording ───────────────────────────────────────────────────────
     arecord --device="hw:${card_num},${dev_num}" \
-        --channels="${max_ch:-2}" \
-        --file-type=raw           \
-        --format="${bitfmt:-S16_LE}" \
-        --rate="${max_rate:-44100}"  \
-        --buffer-time="${buf_time:-500000}" \
-        --buffer-size="${buf_size:-16384}" \
+        --channels="$max_ch"   \
+        --file-type=raw        \
+        --format="$bitfmt"     \
+        --rate="$max_rate"     \
+        --buffer-time="$buf_time" \
+        --buffer-size="$buf_size" \
         > "${MNT}/$(date +%s)_${max_ch}-${max_rate}-${bitfmt}.raw" 2>/dev/null &
 
     recorder=$!
 done
 ENDOFFILE
-OK "/usr/sbin/recorder"
+OK "/usr/sbin/recorder (v3 original)"
 
 # ── /etc/init.d/autorecorder ──────────────────────────────────────────────────
 cat > /etc/init.d/autorecorder << 'ENDOFFILE'
 #!/bin/sh /etc/rc.common
+
 START=99
 STOP=1
 USE_PROCD=1
@@ -204,10 +181,10 @@ start_service() {
 }
 
 reload_service() {
-    procd_send_signal autorecorder
+    procd_send_signal autorecorder  # sends SIGHUP, wakes wait() in recorder loop
 }
 ENDOFFILE
-OK "/etc/init.d/autorecorder"
+OK "/etc/init.d/autorecorder (v3 original)"
 
 # ── /etc/hotplug.d/block/50-autorecorder ─────────────────────────────────────
 mkdir -p /etc/hotplug.d/block
@@ -215,20 +192,19 @@ cat > /etc/hotplug.d/block/50-autorecorder << 'ENDOFFILE'
 #!/bin/sh
 service autorecorder reload
 ENDOFFILE
-OK "/etc/hotplug.d/block/50-autorecorder"
+OK "/etc/hotplug.d/block/50-autorecorder (v3 original)"
 
 # ── /usr/libexec/rpcd/autorecorder ───────────────────────────────────────────
 mkdir -p /usr/libexec/rpcd
 cat > /usr/libexec/rpcd/autorecorder << 'ENDOFFILE'
 #!/bin/sh
-# rpcd shell plugin for hALSAmrec autorecorder
+# rpcd shell plugin for hALSAmrec autorecorder (v3 matching)
 
 RECORDER=/usr/sbin/recorder
 INIT=/etc/init.d/autorecorder
-MNT_DEFAULT=/tmp/mnt
+MNT=/tmp/mnt
 
 is_running() { pgrep -f "$RECORDER" >/dev/null 2>&1; }
-uci_get() { uci -q get "autorecorder.config.$1" 2>/dev/null; }
 
 json_str() {
     printf '%s' "$1" \
@@ -239,7 +215,7 @@ json_str() {
 
 case "$1" in
     list)
-        printf '{"status":{},"start":{},"stop":{},"probe":{},"disk_status":{},"get_config":{},"set_config":{"card":"string","device":"string","mount":"string"}}\n'
+        printf '{"status":{},"start":{},"stop":{},"probe":{},"disk_status":{}}\n'
         ;;
 
     call)
@@ -285,63 +261,29 @@ case "$1" in
                 if is_running; then
                     printf '{"error":"recorder_running","output":""}\n'
                 else
-                    card=$(uci_get card); card="${card:-0}"
-                    dev=$(uci_get device); dev="${dev:-0}"
-                    raw=$(arecord -D "hw:${card},${dev}" --dump-hw-params 2>&1)
-                    out=$(json_str "$raw")
-                    printf '{"error":"","output":"%s"}\n' "$out"
+                    card_line=$(arecord -l 2>/dev/null | grep '^card' | head -n 1)
+                    if [ -n "$card_line" ]; then
+                        c=$(printf '%s\n' "$card_line" | sed 's/^card \([0-9]*\):.*/\1/')
+                        d=$(printf '%s\n' "$card_line" | sed 's/.*device \([0-9]*\):.*/\1/')
+                        raw=$(arecord -D "hw:${c},${d}" --dump-hw-params 2>&1)
+                        out=$(json_str "$raw")
+                        printf '{"error":"","output":"%s"}\n' "$out"
+                    else
+                        printf '{"error":"","output":"No ALSA card detected via arecord -l"}\n'
+                    fi
                 fi
                 ;;
 
             disk_status)
-                mnt=$(uci_get mount); mnt="${mnt:-$MNT_DEFAULT}"
-                if mountpoint -q "$mnt" 2>/dev/null; then
-                    vals=$(df -k "$mnt" | awk 'NR>1 {print $(NF-4), $(NF-3), $(NF-2); exit}')
+                if mountpoint -q "$MNT" 2>/dev/null; then
+                    vals=$(df -k "$MNT" | awk 'NR>1 {print $(NF-4), $(NF-3), $(NF-2); exit}')
                     set -- $vals
                     total="${1:-0}"; used="${2:-0}"; avail="${3:-0}"
                     printf '{"mounted":true,"total_kb":%s,"used_kb":%s,"avail_kb":%s,"mount":"%s"}\n' \
-                        "$total" "$used" "$avail" "$mnt"
+                        "$total" "$used" "$avail" "$MNT"
                 else
-                    printf '{"mounted":false,"total_kb":0,"used_kb":0,"avail_kb":0,"mount":"%s"}\n' "$mnt"
+                    printf '{"mounted":false,"total_kb":0,"used_kb":0,"avail_kb":0,"mount":"%s"}\n' "$MNT"
                 fi
-                ;;
-
-            get_config)
-                card=$(uci_get card)
-                device=$(uci_get device)
-                mount=$(uci_get mount)
-                printf '{"card":"%s","device":"%s","mount":"%s"}\n' \
-                    "${card:-}" "${device:-}" "${mount:-$MNT_DEFAULT}"
-                ;;
-
-            set_config)
-                read -r input
-                card=$(printf '%s' "$input"       | jsonfilter -e '@.card'   2>/dev/null)
-                device=$(printf '%s' "$input"     | jsonfilter -e '@.device' 2>/dev/null)
-                mount_path=$(printf '%s' "$input" | jsonfilter -e '@.mount'  2>/dev/null)
-
-                uci -q set autorecorder.config=autorecorder
-
-                if [ -n "$card" ]; then
-                    uci -q set autorecorder.config.card="$card"
-                else
-                    uci -q delete autorecorder.config.card 2>/dev/null || true
-                fi
-
-                if [ -n "$device" ]; then
-                    uci -q set autorecorder.config.device="$device"
-                else
-                    uci -q delete autorecorder.config.device 2>/dev/null || true
-                fi
-
-                if [ -n "$mount_path" ]; then
-                    uci -q set autorecorder.config.mount="$mount_path"
-                else
-                    uci -q delete autorecorder.config.mount 2>/dev/null || true
-                fi
-
-                uci -q commit autorecorder
-                printf '{"result":"ok"}\n'
                 ;;
 
             *)
@@ -392,25 +334,11 @@ var callDiskStatus = rpc.declare({
     expect: { mounted: false, total_kb: 0, used_kb: 0, avail_kb: 0, mount: '' }
 });
 
-var callGetConfig = rpc.declare({
-    object: 'autorecorder',
-    method: 'get_config',
-    expect: { card: '', device: '', mount: '' }
-});
-
-var callSetConfig = rpc.declare({
-    object: 'autorecorder',
-    method: 'set_config',
-    params: ['card', 'device', 'mount'],
-    expect: { result: '' }
-});
-
 return view.extend({
     load: function() {
         return Promise.all([
             callStatus().catch(function() { return { running: false, pid: 0 }; }),
-            callDiskStatus().catch(function() { return { mounted: false, total_kb: 0, used_kb: 0, avail_kb: 0, mount: '' }; }),
-            callGetConfig().catch(function() { return { card: '', device: '', mount: '' }; })
+            callDiskStatus().catch(function() { return { mounted: false, total_kb: 0, used_kb: 0, avail_kb: 0, mount: '' }; })
         ]);
     },
 
@@ -418,7 +346,6 @@ return view.extend({
         var self   = this;
         var status = data[0] || {};
         var disk   = data[1] || {};
-        var config = data[2] || {};
 
         var btnStart = E('button', {
             'class': 'btn cbi-button cbi-button-apply',
@@ -431,45 +358,6 @@ return view.extend({
             'id':    'ar-btn-stop',
             'click': function() { self._doStop(); }
         }, _('Stop'));
-
-        var cardInput = E('input', {
-            'type':        'text',
-            'id':          'ar-cfg-card',
-            'class':       'cbi-input-text',
-            'style':       'width:60px',
-            'placeholder': _('auto'),
-            'value':       config.card || ''
-        });
-
-        var deviceInput = E('input', {
-            'type':        'text',
-            'id':          'ar-cfg-device',
-            'class':       'cbi-input-text',
-            'style':       'width:60px',
-            'placeholder': '0',
-            'value':       config.device || ''
-        });
-
-        var mountInput = E('input', {
-            'type':        'text',
-            'id':          'ar-cfg-mount',
-            'class':       'cbi-input-text',
-            'style':       'width:240px',
-            'placeholder': '/tmp/mnt',
-            'value':       config.mount || ''
-        });
-
-        var btnSaveCfg = E('button', {
-            'class': 'btn cbi-button cbi-button-save',
-            'id':    'ar-btn-savecfg',
-            'click': function() { self._doSaveConfig(); }
-        }, _('Save'));
-
-        var btnClearCfg = E('button', {
-            'class': 'btn cbi-button cbi-button-reset',
-            'id':    'ar-btn-clearcfg',
-            'click': function() { self._doClearConfig(); }
-        }, _('Clear (revert to auto-detect)'));
 
         var btnProbe = E('button', {
             'class': 'btn cbi-button cbi-button-action',
@@ -488,9 +376,9 @@ return view.extend({
         var page = E('div', { 'class': 'cbi-map' }, [
             E('h2', _('ALSA Recorder')),
             E('div', { 'class': 'cbi-section' }, [
-                E('h3', _('Service')),
+                E('h3', _('Service & Storage')),
                 E('div', { 'class': 'cbi-section-descr' },
-                    _('Status refreshes automatically every 5 seconds.')),
+                    _('Status refreshes automatically every 5 seconds. Backend operates entirely via auto-detection.')),
                 E('table', { 'class': 'table cbi-section-table' }, [
                     E('tr', { 'class': 'tr cbi-rowstyle-1' }, [
                         E('td', {
@@ -515,41 +403,9 @@ return view.extend({
             ]),
 
             E('div', { 'class': 'cbi-section' }, [
-                E('h3', _('Hardware Configuration')),
-                E('div', { 'class': 'cbi-section-descr' },
-                    _('Persist ALSA card and device indices to UCI. ' +
-                      'When set, the recorder skips the arecord\u00a0-l probe on every cycle. ' +
-                      'The recorder auto-populates these on first successful detection. ' +
-                      'Clear to revert to auto-detection (e.g. after a hardware change). ' +
-                      'A service restart is required for changes to take effect.')),
-                E('table', { 'class': 'table cbi-section-table' }, [
-                    E('tr', { 'class': 'tr cbi-rowstyle-1' }, [
-                        E('td', { 'class': 'td left', 'style': 'width:180px;font-weight:bold' },
-                            _('ALSA Card')),
-                        E('td', { 'class': 'td left' }, [cardInput])
-                    ]),
-                    E('tr', { 'class': 'tr cbi-rowstyle-2' }, [
-                        E('td', { 'class': 'td left', 'style': 'font-weight:bold' },
-                            _('ALSA Device')),
-                        E('td', { 'class': 'td left' }, [deviceInput])
-                    ]),
-                    E('tr', { 'class': 'tr cbi-rowstyle-1' }, [
-                        E('td', { 'class': 'td left', 'style': 'font-weight:bold' },
-                            _('Mount Point')),
-                        E('td', { 'class': 'td left' }, [mountInput])
-                    ])
-                ]),
-                E('div', { 'style': 'margin-top:1em;display:flex;gap:6px;flex-wrap:wrap' }, [
-                    btnSaveCfg, btnClearCfg
-                ])
-            ]),
-
-            E('div', { 'class': 'cbi-section' }, [
                 E('h3', _('Hardware Probe')),
                 E('div', { 'class': 'cbi-section-descr' },
-                    _('Dump raw ALSA hardware parameters for the configured card/device ' +
-                      '(falls back to hw:0,0 if not configured). ' +
-                      'The recorder must be stopped first.')),
+                    _('Dump raw ALSA hardware parameters for the auto-detected card. The recorder must be stopped first.')),
                 btnProbe,
                 probeOutput
             ])
@@ -617,8 +473,7 @@ return view.extend({
     },
 
     _setBusy: function(busy) {
-        ['ar-btn-start', 'ar-btn-stop', 'ar-btn-probe',
-         'ar-btn-savecfg', 'ar-btn-clearcfg'].forEach(function(id) {
+        ['ar-btn-start', 'ar-btn-stop', 'ar-btn-probe'].forEach(function(id) {
             var el = document.getElementById(id);
             if (el) el.disabled = busy;
         });
@@ -656,62 +511,6 @@ return view.extend({
         }).then(function() { self._setBusy(false); });
     },
 
-    _doSaveConfig: function() {
-        var self   = this;
-        var card   = (document.getElementById('ar-cfg-card')   || {}).value || '';
-        var device = (document.getElementById('ar-cfg-device') || {}).value || '';
-        var mount  = (document.getElementById('ar-cfg-mount')  || {}).value || '';
-
-        if ((card   !== '' && !/^\d+$/.test(card)) ||
-            (device !== '' && !/^\d+$/.test(device))) {
-            window.alert(_('Card and Device must be numeric (or empty for auto-detect).'));
-            return;
-        }
-
-        self._setBusy(true);
-        return callSetConfig(card, device, mount).then(function() {
-            var btn = document.getElementById('ar-btn-savecfg');
-            if (btn) {
-                var orig = btn.textContent;
-                btn.textContent = _('Saved \u2713');
-                setTimeout(function() {
-                    btn.textContent = orig;
-                    self._setBusy(false);
-                }, 1800);
-            } else {
-                self._setBusy(false);
-            }
-        }).catch(function(err) {
-            window.alert(_('RPC error: ') + (err.message || String(err)));
-            self._setBusy(false);
-        });
-    },
-
-    _doClearConfig: function() {
-        var self = this;
-        ['ar-cfg-card', 'ar-cfg-device', 'ar-cfg-mount'].forEach(function(id) {
-            var el = document.getElementById(id);
-            if (el) el.value = '';
-        });
-        self._setBusy(true);
-        return callSetConfig('', '', '').then(function() {
-            var btn = document.getElementById('ar-btn-clearcfg');
-            if (btn) {
-                var orig = btn.textContent;
-                btn.textContent = _('Cleared \u2713');
-                setTimeout(function() {
-                    btn.textContent = orig;
-                    self._setBusy(false);
-                }, 1800);
-            } else {
-                self._setBusy(false);
-            }
-        }).catch(function(err) {
-            window.alert(_('RPC error: ') + (err.message || String(err)));
-            self._setBusy(false);
-        });
-    },
-
     handleSaveApply: null,
     handleSave:      null,
     handleReset:     null
@@ -746,31 +545,18 @@ cat > /usr/share/rpcd/acl.d/autorecorder.json << 'ENDOFFILE'
         "description": "Grant access to ALSA Recorder controls",
         "read": {
             "ubus": {
-                "autorecorder": [ "status", "probe", "disk_status", "get_config" ]
+                "autorecorder": [ "status", "probe", "disk_status" ]
             }
         },
         "write": {
             "ubus": {
-                "autorecorder": [ "start", "stop", "set_config" ]
+                "autorecorder": [ "start", "stop" ]
             }
         }
     }
 }
 ENDOFFILE
 OK "/usr/share/rpcd/acl.d/autorecorder.json"
-
-# -- /etc/config/autorecorder ------------------------------------------------
-if [ -f /etc/config/autorecorder ]; then
-    OK "/etc/config/autorecorder (already exists -- preserving settings)"
-else
-    cat > /etc/config/autorecorder << 'ENDOFCFG'
-config autorecorder 'config'
-	option card ''
-	option device ''
-	option mount '/tmp/mnt'
-ENDOFCFG
-    OK "/etc/config/autorecorder"
-fi
 
 # ── 3. Permissions ────────────────────────────────────────────────────────────
 STEP "Setting permissions"
@@ -793,7 +579,6 @@ STEP "Restarting rpcd"
 /etc/init.d/rpcd restart
 sleep 1
 
-# Verify the plugin registered successfully
 if ubus list autorecorder >/dev/null 2>&1; then
     OK "rpcd plugin registered: ubus list autorecorder"
 else
@@ -814,5 +599,4 @@ printf "  ${BOLD}LuCI${RESET}   →  Services → ALSA Recorder\n"
 printf "  ${BOLD}Start${RESET}  →  /etc/init.d/autorecorder start\n"
 printf "  ${BOLD}Verify${RESET} →  ubus call autorecorder status\n"
 printf "         →  ubus call autorecorder disk_status\n"
-printf "         →  ubus call autorecorder get_config\n"
 printf "\n"
