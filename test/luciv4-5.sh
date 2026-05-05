@@ -16,8 +16,7 @@
 #
 # Changes from v4:
 #   [FIX-1]  Add /etc/hotplug.d/usb/50-autorecorder — USB audio card
-#            plug/unplug events now correctly wake the recorder (critical
-#            regression vs v2/v3 which installed to both block and usb).
+#            plug/unplug events now correctly wake the recorder (critical)
 #   [FIX-2]  JS _doStart/_doStop now inspect the rpcd result field and
 #            alert the user on failure instead of silently re-enabling buttons.
 #   [FIX-3]  JS poll.add error handling — per-call .catch() prevents a
@@ -300,9 +299,6 @@ EOF_INIT
 OK "/etc/init.d/autorecorder"
 
 # ── /etc/hotplug.d/block/50-autorecorder ─────────────────────────────────────
-# Fires when a block device (USB storage) is added or removed.
-# [FIX-9] Filter to add|remove|change — skip bind/unbind and other kernel
-# events that are irrelevant to storage arrival/departure.
 mkdir -p /etc/hotplug.d/block
 cat > /etc/hotplug.d/block/50-autorecorder << 'EOF_HOTPLUG_BLOCK'
 #!/bin/sh
@@ -316,10 +312,6 @@ EOF_HOTPLUG_BLOCK
 OK "/etc/hotplug.d/block/50-autorecorder"
 
 # ── /etc/hotplug.d/usb/50-autorecorder ───────────────────────────────────────
-# [FIX-1] Critical regression fix: the v2/v3 installer deployed the hotplug
-# script to BOTH block/ and usb/. The v4 installer omitted usb/, meaning that
-# plugging in a USB audio interface (which generates a USB event, not a block
-# event) never woke the recorder. This adds the missing handler.
 mkdir -p /etc/hotplug.d/usb
 cat > /etc/hotplug.d/usb/50-autorecorder << 'EOF_HOTPLUG_USB'
 #!/bin/sh
@@ -989,13 +981,6 @@ EOF_ACL
 OK "/usr/share/rpcd/acl.d/autorecorder.json"
 
 # ── /etc/config/autorecorder ──────────────────────────────────────────────────
-# [FIX-11] Omit empty-string card/device options from the initial config.
-# Writing "option card ''" causes uci get to return an empty string (not
-# "entry not found"), which can confuse UCI tooling and future CBI widgets.
-# The recorder treats a missing option identically to an empty one.
-# The mount option IS written with its default so uci get returns a useful
-# value without the recorder needing a compiled-in fallback string.
-# Guard preserves existing runtime settings on re-install.
 if [ -f /etc/config/autorecorder ]; then
     OK "/etc/config/autorecorder (already exists — preserving settings)"
 else
