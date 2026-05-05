@@ -51,7 +51,7 @@ fi
 
 STEP "Installing required packages"
 # block-mount provides blkid; kmod-fs-exfat for exFAT kernel support
-opkg install alsa-utils block-mount kmod-usb-storage kmod-fs-exfat || \
+opkg install alsa-utils kmod-usb-storage block-mount kmod-usb3 kmod-usb-audio usbutils kmod-fs-exfat || \
     ERR "Package installation failed — check feed availability"
 OK "Packages installed"
 
