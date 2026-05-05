@@ -253,6 +253,15 @@ service autorecorder reload
 EOF_HOTPLUG
 OK "/etc/hotplug.d/block/50-autorecorder"
 
+# ── /etc/hotplug.d/usb/50-autorecorder ────────────────────────────────────────
+mkdir -p /etc/hotplug.d/usb
+cat > /etc/hotplug.d/usb/50-autorecorder << 'EOF_HOTPLUG_USB'
+#!/bin/sh
+service autorecorder reload
+EOF_HOTPLUG_USB
+chmod 0755 /etc/hotplug.d/usb/50-autorecorder
+OK "/etc/hotplug.d/usb/50-autorecorder"
+
 # ── /usr/libexec/rpcd/autorecorder ───────────────────────────────────────────
 mkdir -p /usr/libexec/rpcd
 cat > /usr/libexec/rpcd/autorecorder << 'EOF_RPCD'
