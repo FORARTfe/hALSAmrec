@@ -1,0 +1,1307 @@
+#!/bin/sh
+#
+# install-autorecorder.sh — hALSAmrec v4.6 installer
+# by FORART (https://forart.it/), 2025-26
+# GPL v3 — see <https://www.gnu.org/licenses/>
+#
+# Single-file self-contained installer.
+# All runtime files are embedded as heredocs.
+#
+# Usage:
+#   scp install-autorecorder.sh root@192.168.1.1:/tmp/
+#   ssh root@192.168.1.1 sh /tmp/install-autorecorder.sh
+#
+# Supports: OpenWrt 21.x / 22.x / 23.x / 24.x
+# Idempotent: safe to run multiple times.
+#
+# Changes from v4.5 (engineering fixes — see analysis document):
+#
+#   [FIX-A] recorder: Persistent mount architecture.
+#            The recording disk is now mounted ONCE and stays mounted for
+#            the entire lifetime of the supervisor process.  Previously the
+#            disk was unmounted every time arecord exited (stale-PID cleanup),
+#            then immediately remounted — creating a race window where the
+#            lazy-unmount had not yet completed and the new mount call failed
+#            with "device busy", causing an infinite unmount/remount loop.
+#
+#   [FIX-B] recorder: UUID-based device resolution.
+#            After discovering the exFAT partition, its UUID is read once via
+#            blkid and used to resolve the current /dev/sdX path on every
+#            mount attempt.  This makes the recorder resilient to the kernel
+#            renaming /dev/sda → /dev/sdb after a USB reconnect.
+#
+#   [FIX-C] recorder: active_mnt tracking.
+#            The actual path at which the disk was mounted is stored in
+#            $active_mnt.  If the UCI mount option is changed while the
+#            service is running, the old mount is cleanly torn down and the
+#            disk remounted at the new path, preventing stale-mount orphans.
+#
+#   [FIX-D] recorder: Graceful arecord termination.
+#            kill_recorder() sends SIGTERM first, waits 1 s, then SIGKILL.
+#            SIGKILL was previously used immediately, which prevented arecord
+#            from flushing and closing the output file.
+#
+#   [FIX-E] recorder: Buffer param mutual exclusion.
+#            --buffer-time and --buffer-size are mutually exclusive in
+#            arecord.  v4.5 extracted both and passed both, causing arecord
+#            to reject the command on many devices.  v4.6 passes only
+#            --buffer-time when present; --buffer-size is never passed.
+#
+#   [FIX-F] recorder: Defensive defaults for hardware param detection.
+#            max_ch, bitfmt, and max_rate are given safe fallback values
+#            (2, S16_LE, 48000) so that failed sed extractions do not leave
+#            empty variables that crash arithmetic expressions.
+#
+#   [FIX-G] recorder: Card-not-ready does NOT unmount disk.
+#            When the audio interface is absent, the recorder is stopped but
+#            the recording disk remains mounted.  Reconnecting the audio card
+#            immediately starts a new recording without a remount cycle.
+#
+#   [FIX-H] recorder: Partition-only scanning.
+#            /proc/partitions scan now matches only partition entries
+#            (sd*[0-9], mmcblk*p[0-9]*, nvme*p[0-9]*) so whole-disk nodes
+#            like /dev/sda are not counted as exFAT candidates, preventing
+#            false exfat_count > 1 rejections.
+#
+#   [FIX-I] recorder: Disk-space check uses awk instead of set --.
+#            Avoids positional-parameter collisions with the arecord
+#            argument-building set -- call later in the same loop body.
+#
+#   [FIX-J] init.d: Add procd_set_param respawn.
+#            Without this, procd does not restart the supervisor if it exits
+#            unexpectedly (OOM, kernel signal).  Configured to allow up to
+#            5 restarts per hour with a 5-second cooldown.
+#
+#   [FIX-K] rpcd: Replace sleep 2 with retry loop in start/stop.
+#            A fixed 2-second sleep is a race condition: on loaded routers
+#            procd may take longer than 2 s to spawn the process.  v4.6 polls
+#            is_running() in 1-second increments for up to 4 seconds.
+#
+#   [FIX-L] rpcd: Probe captures arecord exit code; returns probe_warnings
+#            error token on failure so the UI can distinguish "ran and
+#            produced output" from "ran and succeeded".
+#
+#   [FIX-M] rpcd: Probe output expanded.
+#            Returns ALSA card list, hw-param dump, storage status, and
+#            block-device snapshot in one response for actionable diagnostics.
+#
+#   [FIX-N] rpcd: disk_status guards df failure with awk default.
+#            If df returns nothing, fields default to 0 instead of producing
+#            malformed JSON.
+#
+#   [FIX-O] LuCI JS: START/STOP merged into a single toggle button.
+#            Green label "START" when stopped; red label "STOP" when running.
+#            Disabled while transitioning; double-click safe.
+#
+#   [FIX-P] LuCI JS: Poll and _refreshStatus both call _updateToggle.
+#            The toggle button label/colour is now updated live on every 5-s
+#            poll cycle and immediately after every start/stop action.
+#
+#   [FIX-Q] LuCI JS: _setBusy updated for toggle button ID.
+#            Removes defunct ar-btn-start / ar-btn-stop IDs; adds ar-btn-toggle.
+#
+#   [FIX-R] LuCI JS: Probe handler distinguishes probe_warnings from full
+#            errors, showing a visual prefix in the output pane.
+
+set -e
+
+# ── Terminal helpers ──────────────────────────────────────────────────────────
+if [ -t 1 ]; then
+    BOLD='\033[1m'; BLUE='\033[1;34m'; GREEN='\033[1;32m'
+    YELLOW='\033[1;33m'; RED='\033[1;31m'; RESET='\033[0m'
+else
+    BOLD=''; BLUE=''; GREEN=''; YELLOW=''; RED=''; RESET=''
+fi
+
+STEP() { printf "\n${BLUE}=> %s${RESET}\n" "$1"; }
+OK()   { printf "  ${GREEN}OK %s${RESET}\n" "$1"; }
+WARN() { printf "  ${YELLOW}!! %s${RESET}\n" "$1"; }
+ERR()  { printf "  ${RED}FAIL %s${RESET}\n" "$1"; exit 1; }
+
+# ── 0. Pre-flight checks ──────────────────────────────────────────────────────
+STEP "Pre-flight checks"
+
+[ "$(id -u)" -eq 0 ] || ERR "Must be run as root"
+[ -f /etc/openwrt_release ] || ERR "Not an OpenWrt system"
+
+OPENWRT_VER=$(. /etc/openwrt_release && printf '%s' "$DISTRIB_RELEASE")
+OK "OpenWrt $OPENWRT_VER detected"
+
+command -v opkg >/dev/null 2>&1 || ERR "opkg not found"
+OK "opkg available"
+
+# ── 1. Dependencies ───────────────────────────────────────────────────────────
+STEP "Updating package list"
+if opkg update >/dev/null 2>&1; then
+    OK "Package list updated"
+else
+    WARN "opkg update failed — continuing with cached package list"
+fi
+
+STEP "Installing required packages"
+opkg install \
+    alsa-utils \
+    kmod-usb-storage \
+    block-mount \
+    kmod-usb3 \
+    kmod-usb-audio \
+    usbutils \
+    kmod-fs-exfat \
+    jsonfilter \
+    || ERR "Package installation failed — check feed availability"
+OK "Packages installed"
+
+# ── 2. Write runtime files ────────────────────────────────────────────────────
+STEP "Writing runtime files"
+
+# ── /usr/sbin/recorder ────────────────────────────────────────────────────────
+cat > /usr/sbin/recorder << 'EOF_RECORDER'
+#!/bin/sh
+#
+# /usr/sbin/recorder — hALSAmrec v4.6
+# Original script by J. Bruce Fields, 2024
+# This version by FORART (https://forart.it/), 2025-26
+# GPL v3 — see <https://www.gnu.org/licenses/>
+#
+# Architecture: single supervisor loop that mounts the recording disk ONCE
+# and keeps it mounted for the entire service lifetime.  arecord is a child
+# process; its exit never triggers an unmount.  The disk is only unmounted
+# when it is physically removed (disk="" after scan) or SIGTERM is received.
+#
+# Hotplug events reach this loop as SIGHUP via "service autorecorder reload",
+# which interrupts the wait() call so the loop re-evaluates hardware state
+# without stopping an in-progress recording.
+
+uci_get() { uci -q get "autorecorder.config.$1" 2>/dev/null; }
+
+# kill_recorder: SIGTERM → 1 s grace → SIGKILL.
+# [FIX-D] Allows arecord to flush and close the output file cleanly.
+kill_recorder() {
+    local pid="$1"
+    [ -z "$pid" ] && return
+    kill "$pid" 2>/dev/null
+    sleep 1
+    kill -9 "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null || true
+}
+
+MNT=$(uci_get mount)
+MNT="${MNT:-/tmp/mnt}"
+
+recorder=""       # PID of active arecord child; empty when not recording
+disk_mounted=0    # 1 when recording disk is currently mounted
+active_mnt=""     # actual mountpoint in use (may differ from $MNT if UCI changed)
+
+# SIGHUP: interrupt wait() only — never terminate recorder child.
+trap 'true' SIGHUP
+
+# Sentinel: sleep infinity gives the wait() call something to block on when
+# no arecord is running, and is interruptible by SIGHUP.
+sleep infinity &
+dummy=$!
+
+# SIGTERM: clean shutdown — stop arecord, unmount disk, exit.
+# [FIX-D] Uses kill_recorder (SIGTERM first) instead of SIGKILL.
+trap '
+    kill "$dummy" 2>/dev/null
+    kill_recorder "$recorder"
+    [ "$disk_mounted" -eq 1 ] && umount -l "${active_mnt:-$MNT}" 2>/dev/null
+    exit 0
+' SIGTERM
+
+first=0
+
+while true; do
+
+    if [ $first -eq 0 ]; then
+        first=1
+    else
+        # Block until arecord (or the sentinel) exits.
+        # SIGHUP interrupts this wait, allowing the loop to re-evaluate
+        # hardware state while leaving a running arecord untouched.
+        wait ${recorder:-$dummy}
+    fi
+
+    # Re-read mount point each cycle in case UCI was updated via LuCI.
+    MNT=$(uci_get mount)
+    MNT="${MNT:-/tmp/mnt}"
+
+    # ── [FIX-C] UCI mount change while disk is mounted: remount at new path ──
+    # If the user changes the mount path in LuCI while the service is running,
+    # cleanly unmount the old path and remount at the new one.
+    if [ "$disk_mounted" -eq 1 ] && [ -n "$active_mnt" ] && [ "$MNT" != "$active_mnt" ]; then
+        kill_recorder "$recorder"
+        recorder=""
+        umount -l "$active_mnt" 2>/dev/null
+        disk_mounted=0
+        active_mnt=""
+        # Fall through — will remount at new $MNT below.
+    fi
+
+    # ── Audio card detection ──────────────────────────────────────────────────
+    # Use UCI-persisted card/device if available — skips arecord -l entirely.
+    card_num=$(uci_get card)
+    dev_num=$(uci_get device)
+
+    if [ -n "$card_num" ] && [ -n "$dev_num" ]; then
+        card_ready=1
+    else
+        card_line=$(arecord -l 2>/dev/null | grep '^card' | head -n 1)
+        if [ -n "$card_line" ]; then
+            card_num=$(printf '%s\n' "$card_line" | sed 's/^card \([0-9]*\):.*/\1/')
+            dev_num=$(printf '%s\n'  "$card_line" | sed 's/.*device \([0-9]*\):.*/\1/')
+            card_ready=1
+        else
+            card_num="" dev_num="" card_ready=0
+        fi
+    fi
+
+    # ── Disk detection ────────────────────────────────────────────────────────
+    # [FIX-H] Match only partition entries (names ending in a digit) so that
+    # whole-disk nodes like /dev/sda are not counted as exFAT candidates.
+    # This prevents false "exfat_count > 1" rejections when a single USB drive
+    # exposes both /dev/sda (whole disk, no fs) and /dev/sda1 (partition,
+    # exFAT), which the old pattern sd* would count as two exFAT hits.
+    #
+    # [FIX-B] For each matching partition, capture the UUID so we can resolve
+    # the current /dev/sdX path on every mount attempt (resilient to kernel
+    # renaming /dev/sda → /dev/sdb after a USB hot-reconnect).
+    disk="" disk_uuid="" exfat_count=0
+    while read -r _maj _min _blk name; do
+        case "$name" in
+            sd*[0-9] | mmcblk*p[0-9]* | nvme*p[0-9]*)
+                dev="/dev/$name"
+                [ -b "$dev" ] || continue
+                fs_type=$(blkid -o value -s TYPE "$dev" 2>/dev/null)
+                if [ -z "$fs_type" ]; then
+                    # Fallback: raw exFAT OEM-ID check at superblock offset 3.
+                    # Works without kmod-fs-exfat loaded and on busybox builds
+                    # where blkid was compiled without exFAT type detection.
+                    dd if="$dev" bs=1 skip=3 count=5 2>/dev/null \
+                        | grep -q 'EXFAT' && fs_type='exfat'
+                fi
+                case "$fs_type" in [Ee][Xx][Ff][Aa][Tt])
+                    exfat_count=$((exfat_count + 1))
+                    disk="$dev"
+                    disk_uuid=$(blkid -o value -s UUID "$dev" 2>/dev/null)
+                esac
+        esac
+    done < /proc/partitions
+
+    # Require exactly ONE exFAT partition — multiple disks → ambiguous target.
+    if [ "$exfat_count" -ne 1 ]; then
+        disk=""
+        disk_uuid=""
+    fi
+
+    # ── [FIX-A] Disk removed: stop recording and unmount ─────────────────────
+    # ONLY unmount here — when the physical disk is gone.
+    # arecord exiting naturally does NOT trigger an unmount.
+    if [ "$disk_mounted" -eq 1 ] && [ -z "$disk" ]; then
+        kill_recorder "$recorder"
+        recorder=""
+        umount -l "${active_mnt:-$MNT}" 2>/dev/null
+        disk_mounted=0
+        active_mnt=""
+        continue
+    fi
+
+    # ── [FIX-A] Stale PID cleanup — DO NOT unmount ───────────────────────────
+    # When arecord exits (disk full, encoding error, audio glitch), clear the
+    # PID so the loop can start a new recording.  The disk STAYS mounted —
+    # there is no reason to unmount it just because one recording session ended.
+    # v4.5 unmounted here, creating the remount race condition (see FIX-A).
+    if [ -n "$recorder" ] && [ ! -e "/proc/$recorder" ]; then
+        recorder=""
+    fi
+
+    # ── [FIX-G] Card not ready: stop arecord but keep disk mounted ───────────
+    # The audio interface may briefly disconnect (driver reset, USB glitch)
+    # while the storage is perfectly healthy.  Unmounting and remounting the
+    # recording disk for every audio event wastes I/O and risks remount races.
+    if [ "$card_ready" -eq 0 ]; then
+        if [ -n "$recorder" ]; then
+            kill_recorder "$recorder"
+            recorder=""
+        fi
+        continue
+    fi
+
+    # ── Mount disk if present and not yet mounted ─────────────────────────────
+    if [ -n "$disk" ] && [ "$disk_mounted" -eq 0 ]; then
+        mkdir -p "$MNT"
+        # [FIX-B] Resolve UUID → current /dev/sdX path.
+        # blkid -t UUID=... -l -o device returns the device node that currently
+        # carries this UUID, regardless of kernel enumeration order.
+        if [ -n "$disk_uuid" ]; then
+            resolved=$(blkid -t "UUID=${disk_uuid}" -l -o device 2>/dev/null)
+            [ -n "$resolved" ] && disk="$resolved"
+        fi
+        mount "$disk" "$MNT" 2>/dev/null || continue
+        disk_mounted=1
+        active_mnt="$MNT"
+    fi
+
+    # Recording already in progress — nothing to do this cycle.
+    [ -n "$recorder" ] && continue
+
+    # ── Disk space check ──────────────────────────────────────────────────────
+    # [FIX-I] Use awk instead of set -- to avoid clobbering $@ which is
+    # needed later for building the arecord argument list.
+    # Require at least 100 MB free before starting a new recording.
+    avail_kb=$(df -k "$active_mnt" 2>/dev/null | tail -n 1 | awk '{print $4}')
+    avail_kb="${avail_kb:-0}"
+    if [ "$(( avail_kb / 1024 ))" -le 100 ]; then
+        sleep 5
+        continue
+    fi
+
+    # ── Hardware parameter detection ──────────────────────────────────────────
+    arecord_out=$(arecord -D "hw:${card_num},${dev_num}" --dump-hw-params 2>&1)
+
+    # Max channels: upper bound of range [min max], fallback to single value.
+    # [FIX-F] Default 2 if not detected.
+    max_ch=$(printf '%s\n' "$arecord_out" \
+        | sed -n 's/^CHANNELS:.*\[\([0-9]*\) \([0-9]*\)\].*/\2/p')
+    [ -z "$max_ch" ] && \
+        max_ch=$(printf '%s\n' "$arecord_out" \
+            | sed -n 's/^CHANNELS:[[:space:]]*\[*\([0-9][0-9]*\).*/\1/p')
+    max_ch="${max_ch:-2}"
+
+    # Format: last listed format token.
+    # [FIX-F] Default S16_LE if not detected.
+    fmt_raw=$(printf '%s\n' "$arecord_out" \
+        | sed -n 's/^FORMAT:[[:space:]]*//p' | head -n 1)
+    bitfmt="${fmt_raw##* }"
+    bitfmt="${bitfmt:-S16_LE}"
+
+    # Max sample rate: upper bound of range, capped at 48000.
+    # [FIX-F] Default 48000; guard against non-numeric to prevent arithmetic crash.
+    max_rate=$(printf '%s\n' "$arecord_out" \
+        | sed -n 's/^RATE:.*[\[(]\([0-9]*\) \([0-9]*\)[])].*/ \2/p')
+    [ -z "$max_rate" ] && \
+        max_rate=$(printf '%s\n' "$arecord_out" \
+            | sed -n 's/^RATE:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
+    max_rate="${max_rate:-48000}"
+    case "$max_rate" in *[!0-9]*) max_rate=48000 ;; esac  # strip non-numeric
+    [ "$max_rate" -gt 48000 ] && max_rate=48000
+
+    # [FIX-E] Buffer time only — --buffer-time and --buffer-size are mutually
+    # exclusive in arecord.  v4.5 extracted both and passed both; arecord
+    # rejected the command on devices where both were non-empty.
+    # We use buffer-time (preferred); buffer-size is never passed.
+    buf_time=$(printf '%s\n' "$arecord_out" \
+        | sed -n 's/^BUFFER_TIME:.*[\[(]\([0-9]*\) \([0-9]*\)[])].*/ \2/p')
+
+    # ── Auto-persist detected card/device to UCI ──────────────────────────────
+    # Only writes if UCI values are absent.  Double-check inside narrow window
+    # to reduce probability of clobbering a concurrent LuCI set_config save.
+    if [ "$card_ready" -eq 1 ] && [ -z "$(uci_get card)" ]; then
+        _recheck=$(uci_get card)
+        if [ -z "$_recheck" ]; then
+            uci -q set autorecorder.config=autorecorder
+            uci -q set autorecorder.config.card="$card_num"
+            uci -q set autorecorder.config.device="$dev_num"
+            uci -q commit autorecorder
+        fi
+    fi
+
+    # ── Start recording ───────────────────────────────────────────────────────
+    # Build command with set -- so each argument is properly quoted.
+    set -- arecord \
+        "--device=hw:${card_num},${dev_num}" \
+        "--channels=${max_ch}" \
+        "--file-type=raw" \
+        "--format=${bitfmt}" \
+        "--rate=${max_rate}"
+    [ -n "$buf_time" ] && set -- "$@" "--buffer-time=${buf_time}"
+
+    "$@" > "${active_mnt}/$(date +%s)_${max_ch}-${max_rate}-${bitfmt}.raw" 2>/dev/null &
+    recorder=$!
+
+done
+EOF_RECORDER
+OK "/usr/sbin/recorder"
+
+# ── /etc/init.d/autorecorder ──────────────────────────────────────────────────
+cat > /etc/init.d/autorecorder << 'EOF_INIT'
+#!/bin/sh /etc/rc.common
+#
+# autorecorder procd init script — hALSAmrec v4.6
+# by FORART (https://forart.it/), 2025-26
+# GPL v3 — see <https://www.gnu.org/licenses/>
+
+START=99
+STOP=1
+USE_PROCD=1
+PROG=/usr/sbin/recorder
+
+start_service() {
+    procd_open_instance
+    procd_set_param command  "$PROG"
+    procd_set_param stdout   1
+    procd_set_param stderr   1
+    procd_set_param reload_signal SIGHUP
+    # [FIX-J] Respawn: restart the supervisor if it exits unexpectedly.
+    # Parameters: interval=3600 s (reset crash counter after 1 h),
+    #             limit=5 (give up after 5 crashes in the interval),
+    #             delay=5 s (cooldown before each restart).
+    # Without this, procd does NOT restart the service on unexpected exit.
+    procd_set_param respawn  3600 5 5
+    procd_close_instance
+}
+
+# reload_service sends SIGHUP via procd, which interrupts the wait() call in
+# the recorder loop so it re-evaluates hardware state without stopping an
+# in-progress recording.
+reload_service() {
+    procd_send_signal autorecorder
+}
+EOF_INIT
+OK "/etc/init.d/autorecorder"
+
+# ── /etc/hotplug.d/block/50-autorecorder ─────────────────────────────────────
+mkdir -p /etc/hotplug.d/block
+cat > /etc/hotplug.d/block/50-autorecorder << 'EOF_HOTPLUG_BLOCK'
+#!/bin/sh
+# Wake the recorder supervisor when block device state changes.
+# SIGHUP interrupts wait() in the recorder loop; in-progress recordings
+# are not terminated — the loop simply re-evaluates hardware readiness.
+# Filter to add|remove|change only — skip bind/unbind and other kernel events.
+case "$ACTION" in
+    add|remove|change) service autorecorder reload ;;
+esac
+EOF_HOTPLUG_BLOCK
+OK "/etc/hotplug.d/block/50-autorecorder"
+
+# ── /etc/hotplug.d/usb/50-autorecorder ───────────────────────────────────────
+mkdir -p /etc/hotplug.d/usb
+cat > /etc/hotplug.d/usb/50-autorecorder << 'EOF_HOTPLUG_USB'
+#!/bin/sh
+# Wake the recorder supervisor on USB device arrival or departure.
+# USB audio interfaces generate usb hotplug events but NOT block events.
+case "$ACTION" in
+    add|remove|change) service autorecorder reload ;;
+esac
+EOF_HOTPLUG_USB
+OK "/etc/hotplug.d/usb/50-autorecorder"
+
+# ── /usr/libexec/rpcd/autorecorder ───────────────────────────────────────────
+mkdir -p /usr/libexec/rpcd
+cat > /usr/libexec/rpcd/autorecorder << 'EOF_RPCD'
+#!/bin/sh
+#
+# rpcd shell plugin for hALSAmrec autorecorder v4.6
+# by FORART (https://forart.it/), 2025-26
+# GPL v3 — see <https://www.gnu.org/licenses/>
+#
+# Methods: status, start, stop, probe, disk_status, get_config, set_config
+#
+# Changes from v4.5:
+#   [FIX-K] start/stop: Replace sleep 2 with 4-iteration 1 s retry loop.
+#            Fixed sleep was a race condition on loaded routers.
+#   [FIX-L] probe: Capture arecord exit code; return probe_warnings token
+#            when arecord exits non-zero so JS can distinguish success vs
+#            failure without relying on empty output field.
+#   [FIX-M] probe: Output expanded to include ALSA card list, hw-param dump,
+#            storage status, and block-device snapshot for actionable diagnostics.
+#   [FIX-N] disk_status: Guard df field extraction with awk defaults to
+#            prevent malformed JSON when df returns no output.
+
+RECORDER=/usr/sbin/recorder
+INIT=/etc/init.d/autorecorder
+MNT_DEFAULT=/tmp/mnt
+
+# is_running: match full cmdline because kernel sets comm to "sh" (interpreter)
+# not "recorder" when procd exec's the shebang script.
+is_running() { pgrep -f "$RECORDER" >/dev/null 2>&1; }
+
+uci_get() { uci -q get "autorecorder.config.$1" 2>/dev/null; }
+
+# is_mounted: busybox-safe /proc/mounts check (mountpoint(1) is util-linux).
+is_mounted() {
+    awk -v m="$1" '$2 == m { found=1 } END { exit !found }' /proc/mounts 2>/dev/null
+}
+
+# json_str: escape a string for embedding in a JSON double-quoted value.
+# Handles backslashes, double-quotes, newlines, and tabs.
+# Busybox sed does not support \n/\t in s/// replacement — tr is used as
+# an intermediary to avoid that limitation.
+json_str() {
+    printf '%s' "$1" \
+        | sed 's/\\/\\\\/g; s/"/\\"/g' \
+        | tr '\n\t' '\001\002' \
+        | sed 's/\001/\\n/g; s/\002/\\t/g'
+}
+
+case "$1" in
+    list)
+        printf '{"status":{},"start":{},"stop":{},"probe":{},"disk_status":{},"get_config":{},"set_config":{"card":"","device":"","mount":""}}\n'
+        ;;
+
+    call)
+        case "$2" in
+
+            status)
+                if is_running; then
+                    pid=$(pgrep -f "$RECORDER" | head -n 1)
+                    printf '{"running":true,"pid":%s}\n' "$pid"
+                else
+                    printf '{"running":false,"pid":0}\n'
+                fi
+                ;;
+
+            start)
+                if is_running; then
+                    printf '{"result":"already_running"}\n'
+                else
+                    "$INIT" start >/dev/null 2>&1
+                    # [FIX-K] Retry loop: poll is_running() for up to 4 s.
+                    # Fixed sleep 2 was a race on loaded routers where procd
+                    # takes longer than 2 s to spawn the supervisor process.
+                    i=0
+                    while [ $i -lt 4 ]; do
+                        sleep 1
+                        is_running && break
+                        i=$((i + 1))
+                    done
+                    if is_running; then
+                        printf '{"result":"started"}\n'
+                    else
+                        printf '{"result":"failed"}\n'
+                    fi
+                fi
+                ;;
+
+            stop)
+                if ! is_running; then
+                    printf '{"result":"already_stopped"}\n'
+                else
+                    "$INIT" stop >/dev/null 2>&1
+                    # [FIX-K] Same retry logic for stop.
+                    i=0
+                    while [ $i -lt 4 ]; do
+                        sleep 1
+                        ! is_running && break
+                        i=$((i + 1))
+                    done
+                    if ! is_running; then
+                        printf '{"result":"stopped"}\n'
+                    else
+                        printf '{"result":"failed"}\n'
+                    fi
+                fi
+                ;;
+
+            probe)
+                # [FIX-L][FIX-M] Expanded probe with actionable diagnostics.
+                # Returns four sections: ALSA card list, hw-param dump for the
+                # configured device, storage status, and block-device snapshot.
+                if is_running; then
+                    printf '{"error":"recorder_running","output":""}\n'
+                else
+                    card=$(uci_get card); card="${card:-0}"
+                    dev=$(uci_get device);  dev="${dev:-0}"
+                    mnt=$(uci_get mount);   mnt="${mnt:-$MNT_DEFAULT}"
+
+                    # Section 1: ALSA capture device list
+                    card_list=$(arecord -l 2>&1 || printf '(arecord -l failed)')
+
+                    # Section 2: HW-param dump for configured card/device.
+                    # Exit code captured to set error token if arecord fails.
+                    hw_params=$(arecord -D "hw:${card},${dev}" --dump-hw-params 2>&1)
+                    hw_rc=$?
+
+                    # Section 3: Storage status at configured mount point
+                    if is_mounted "$mnt"; then
+                        df_line=$(df -k "$mnt" 2>/dev/null | tail -n 1)
+                        disk_info="Mounted at ${mnt}
+${df_line}"
+                    else
+                        disk_info="NOT mounted at ${mnt}"
+                    fi
+
+                    # Section 4: /proc/partitions snapshot
+                    part_info=$(cat /proc/partitions 2>/dev/null)
+
+                    combined="=== ALSA CAPTURE DEVICES ===
+${card_list}
+
+=== HW PARAMS (hw:${card},${dev}) ===
+${hw_params}
+
+=== STORAGE (${mnt}) ===
+${disk_info}
+
+=== BLOCK DEVICES (/proc/partitions) ===
+${part_info}"
+
+                    out=$(json_str "$combined")
+
+                    # [FIX-L] Return probe_warnings when arecord exits non-zero
+                    # so the UI can prefix the output with a warning label.
+                    if [ "$hw_rc" -ne 0 ]; then
+                        printf '{"error":"probe_warnings","output":"%s"}\n' "$out"
+                    else
+                        printf '{"error":"","output":"%s"}\n' "$out"
+                    fi
+                fi
+                ;;
+
+            disk_status)
+                mnt=$(uci_get mount); mnt="${mnt:-$MNT_DEFAULT}"
+                if is_mounted "$mnt"; then
+                    # [FIX-N] Guard df field extraction: awk provides 0 defaults
+                    # if df returns empty output, preventing malformed JSON.
+                    df_line=$(df -k "$mnt" 2>/dev/null | tail -n 1)
+                    total_kb=$(printf '%s\n' "$df_line" | awk '{print ($2+0)}')
+                    used_kb=$(printf '%s\n'  "$df_line" | awk '{print ($3+0)}')
+                    avail_kb=$(printf '%s\n' "$df_line" | awk '{print ($4+0)}')
+                    printf '{"mounted":true,"total_kb":%s,"used_kb":%s,"avail_kb":%s,"mount":"%s"}\n' \
+                        "$total_kb" "$used_kb" "$avail_kb" "$mnt"
+                else
+                    printf '{"mounted":false,"total_kb":0,"used_kb":0,"avail_kb":0,"mount":"%s"}\n' "$mnt"
+                fi
+                ;;
+
+            get_config)
+                card=$(uci_get card)
+                device=$(uci_get device)
+                mount=$(uci_get mount)
+                printf '{"card":"%s","device":"%s","mount":"%s"}\n' \
+                    "${card:-}" "${device:-}" "${mount:-$MNT_DEFAULT}"
+                ;;
+
+            set_config)
+                read -r input
+                card=$(printf '%s' "$input"       | jsonfilter -e '@.card'   2>/dev/null)
+                device=$(printf '%s' "$input"     | jsonfilter -e '@.device' 2>/dev/null)
+                mount_path=$(printf '%s' "$input" | jsonfilter -e '@.mount'  2>/dev/null)
+
+                # Validate mount path: must be absolute if non-empty.
+                # Empty = delete option (revert to /tmp/mnt default).
+                if [ -n "$mount_path" ]; then
+                    case "$mount_path" in
+                        /*) ;;
+                        *)
+                            printf '{"result":"invalid_mount"}\n'
+                            exit 0
+                            ;;
+                    esac
+                fi
+
+                uci -q set autorecorder.config=autorecorder
+
+                if [ -n "$card" ]; then
+                    uci -q set autorecorder.config.card="$card"
+                else
+                    uci -q delete autorecorder.config.card 2>/dev/null || true
+                fi
+
+                if [ -n "$device" ]; then
+                    uci -q set autorecorder.config.device="$device"
+                else
+                    uci -q delete autorecorder.config.device 2>/dev/null || true
+                fi
+
+                if [ -n "$mount_path" ]; then
+                    uci -q set autorecorder.config.mount="$mount_path"
+                else
+                    uci -q delete autorecorder.config.mount 2>/dev/null || true
+                fi
+
+                uci -q commit autorecorder
+                printf '{"result":"ok"}\n'
+                ;;
+
+            *)
+                printf '{"error":"unknown_method"}\n'
+                ;;
+        esac
+        ;;
+esac
+EOF_RPCD
+OK "/usr/libexec/rpcd/autorecorder"
+
+# ── /www/luci-static/resources/view/autorecorder/main.js ─────────────────────
+mkdir -p /www/luci-static/resources/view/autorecorder
+cat > /www/luci-static/resources/view/autorecorder/main.js << 'EOF_JS'
+'use strict';
+'require view';
+'require rpc';
+'require poll';
+'require dom';
+
+// ── RPC declarations ──────────────────────────────────────────────────────────
+
+var callStatus = rpc.declare({
+    object: 'autorecorder',
+    method: 'status',
+    expect: { running: false, pid: 0 }
+});
+
+var callStart = rpc.declare({
+    object: 'autorecorder',
+    method: 'start',
+    expect: { result: '' }
+});
+
+var callStop = rpc.declare({
+    object: 'autorecorder',
+    method: 'stop',
+    expect: { result: '' }
+});
+
+var callProbe = rpc.declare({
+    object: 'autorecorder',
+    method: 'probe',
+    expect: { error: '', output: '' }
+});
+
+var callDiskStatus = rpc.declare({
+    object: 'autorecorder',
+    method: 'disk_status',
+    expect: { mounted: false, total_kb: 0, used_kb: 0, avail_kb: 0, mount: '' }
+});
+
+var callGetConfig = rpc.declare({
+    object: 'autorecorder',
+    method: 'get_config',
+    expect: { card: '', device: '', mount: '' }
+});
+
+var callSetConfig = rpc.declare({
+    object: 'autorecorder',
+    method: 'set_config',
+    params: ['card', 'device', 'mount'],
+    expect: { result: '' }
+});
+
+// ── View ──────────────────────────────────────────────────────────────────────
+
+return view.extend({
+
+    load: function() {
+        // Individual .catch() on each call so a single transient RPC failure
+        // (rpcd still starting, session race on page load) does not cause
+        // Promise.all to reject and leave the page blank.
+        return Promise.all([
+            callStatus().catch(function() {
+                return { running: false, pid: 0 };
+            }),
+            callDiskStatus().catch(function() {
+                return { mounted: false, total_kb: 0, used_kb: 0, avail_kb: 0, mount: '/tmp/mnt' };
+            }),
+            callGetConfig().catch(function() {
+                return { card: '', device: '', mount: '/tmp/mnt' };
+            })
+        ]);
+    },
+
+    render: function(data) {
+        var self   = this;
+        var status = data[0];
+        var disk   = data[1];
+        var config = data[2];
+
+        // ── [FIX-O] Single toggle button: green START / red STOP ─────────────
+        // The button label and colour always reflect the REAL backend state
+        // (fetched in load() above); _updateToggle() keeps it live thereafter.
+        var running = !!(status && status.running);
+        var btnToggle = E('button', {
+            'class': 'btn cbi-button ' +
+                     (running ? 'cbi-button-negative' : 'cbi-button-apply'),
+            'id':    'ar-btn-toggle',
+            'style': 'min-width:90px;font-weight:bold;color:#fff;' +
+                     (running
+                         ? 'background:#dc3545;border-color:#dc3545'
+                         : 'background:#28a745;border-color:#28a745'),
+            'click': function() { self._doToggle(); }
+        }, running ? _('STOP') : _('START'));
+
+        // ── Config inputs ─────────────────────────────────────────────────────
+        var cardInput = E('input', {
+            'type':        'text',
+            'id':          'ar-cfg-card',
+            'class':       'cbi-input-text',
+            'style':       'width:60px',
+            'placeholder': _('auto'),
+            'value':       config.card || ''
+        });
+
+        var deviceInput = E('input', {
+            'type':        'text',
+            'id':          'ar-cfg-device',
+            'class':       'cbi-input-text',
+            'style':       'width:60px',
+            'placeholder': '0',
+            'value':       config.device || ''
+        });
+
+        var mountInput = E('input', {
+            'type':        'text',
+            'id':          'ar-cfg-mount',
+            'class':       'cbi-input-text',
+            'style':       'width:240px',
+            'placeholder': '/tmp/mnt',
+            'value':       config.mount || ''
+        });
+
+        var btnSaveCfg = E('button', {
+            'class': 'btn cbi-button cbi-button-save',
+            'id':    'ar-btn-savecfg',
+            'click': function() { self._doSaveConfig(); }
+        }, _('Save'));
+
+        var btnClearCfg = E('button', {
+            'class': 'btn cbi-button cbi-button-reset',
+            'id':    'ar-btn-clearcfg',
+            'click': function() { self._doClearConfig(); }
+        }, _('Clear (revert to auto-detect)'));
+
+        // ── Probe section ─────────────────────────────────────────────────────
+        var btnProbe = E('button', {
+            'class': 'btn cbi-button cbi-button-action',
+            'id':    'ar-btn-probe',
+            'click': function() { self._doProbe(); }
+        }, _('Probe Hardware'));
+
+        var probeOutput = E('pre', {
+            'id':    'ar-probe-output',
+            'style': 'display:none;margin-top:0.75em;padding:8px 10px;' +
+                     'background:#f4f4f4;border:1px solid #ddd;border-radius:3px;' +
+                     'font-size:0.82em;white-space:pre-wrap;word-break:break-all;' +
+                     'max-height:360px;overflow-y:auto'
+        });
+
+        // ── Page layout ───────────────────────────────────────────────────────
+        var page = E('div', { 'class': 'cbi-map' }, [
+
+            E('h2', _('ALSA Recorder')),
+
+            // Section: service status + toggle
+            E('div', { 'class': 'cbi-section' }, [
+                E('h3', _('Service')),
+                E('div', { 'class': 'cbi-section-descr' },
+                    _('Status refreshes automatically every 5 seconds.')),
+                E('table', { 'class': 'table cbi-section-table' }, [
+                    E('tr', { 'class': 'tr cbi-rowstyle-1' }, [
+                        E('td', {
+                            'class': 'td left',
+                            'style': 'width:180px;font-weight:bold;vertical-align:middle'
+                        }, _('Recorder')),
+                        E('td', { 'class': 'td left', 'id': 'ar-status-cell' },
+                            [self._statusBadge(status)])
+                    ]),
+                    E('tr', { 'class': 'tr cbi-rowstyle-2' }, [
+                        E('td', {
+                            'class': 'td left',
+                            'style': 'font-weight:bold;vertical-align:middle'
+                        }, _('Storage')),
+                        E('td', { 'class': 'td left', 'id': 'ar-disk-cell' },
+                            [self._diskInfo(disk)])
+                    ])
+                ]),
+                // [FIX-O] Single toggle button replaces separate Start/Stop
+                E('div', { 'style': 'margin-top:1em;display:flex;gap:6px;flex-wrap:wrap' }, [
+                    btnToggle
+                ])
+            ]),
+
+            // Section: UCI hardware configuration
+            E('div', { 'class': 'cbi-section' }, [
+                E('h3', _('Hardware Configuration')),
+                E('div', { 'class': 'cbi-section-descr' },
+                    _('Persist ALSA card and device indices to UCI. ' +
+                      'When set, the recorder skips the arecord\u00a0-l probe on every cycle. ' +
+                      'The recorder auto-populates these on first successful detection. ' +
+                      'Clear to revert to auto-detection (e.g.\u00a0after a hardware change). ' +
+                      'A service restart is required for changes to take effect.')),
+                E('table', { 'class': 'table cbi-section-table' }, [
+                    E('tr', { 'class': 'tr cbi-rowstyle-1' }, [
+                        E('td', { 'class': 'td left', 'style': 'width:180px;font-weight:bold' },
+                            _('ALSA Card')),
+                        E('td', { 'class': 'td left' }, [cardInput])
+                    ]),
+                    E('tr', { 'class': 'tr cbi-rowstyle-2' }, [
+                        E('td', { 'class': 'td left', 'style': 'font-weight:bold' },
+                            _('ALSA Device')),
+                        E('td', { 'class': 'td left' }, [deviceInput])
+                    ]),
+                    E('tr', { 'class': 'tr cbi-rowstyle-1' }, [
+                        E('td', { 'class': 'td left', 'style': 'font-weight:bold' },
+                            _('Mount Point')),
+                        E('td', { 'class': 'td left' }, [mountInput])
+                    ])
+                ]),
+                E('div', { 'style': 'margin-top:1em;display:flex;gap:6px;flex-wrap:wrap' }, [
+                    btnSaveCfg, btnClearCfg
+                ])
+            ]),
+
+            // Section: hardware probe
+            E('div', { 'class': 'cbi-section' }, [
+                E('h3', _('Hardware Probe')),
+                E('div', { 'class': 'cbi-section-descr' },
+                    _('Dump ALSA hardware parameters, storage status, and block-device ' +
+                      'snapshot for the configured card/device (falls back to hw:0,0). ' +
+                      'The recorder must be stopped first.')),
+                btnProbe,
+                probeOutput
+            ])
+        ]);
+
+        // ── Poll status + disk every 5 s ──────────────────────────────────────
+        // [FIX-P] Poll also calls _updateToggle so the button colour/label
+        // tracks the live backend state without a page reload.
+        poll.add(function() {
+            return Promise.all([
+                callStatus().catch(function() {
+                    return { running: false, pid: 0 };
+                }),
+                callDiskStatus().catch(function() {
+                    return { mounted: false, total_kb: 0, used_kb: 0, avail_kb: 0, mount: '/tmp/mnt' };
+                })
+            ]).then(function(results) {
+                var sc = document.getElementById('ar-status-cell');
+                var dc = document.getElementById('ar-disk-cell');
+                if (sc) dom.content(sc, self._statusBadge(results[0]));
+                if (dc) dom.content(dc, self._diskInfo(results[1]));
+                // [FIX-P] Live toggle button update from poll
+                self._updateToggle(!!(results[0] && results[0].running));
+            });
+        }, 5);
+
+        return page;
+    },
+
+    // ── Rendering helpers ─────────────────────────────────────────────────────
+
+    _statusBadge: function(status) {
+        var running = status && status.running;
+        var label   = running
+            ? ('\u25cf\u00a0' + _('Running') + '\u00a0\u2014\u00a0PID\u00a0' + status.pid)
+            : ('\u25cf\u00a0' + _('Stopped'));
+        return E('span', {
+            'style': running ? 'color:#28a745;font-weight:bold'
+                             : 'color:#dc3545;font-weight:bold'
+        }, label);
+    },
+
+    _diskInfo: function(disk) {
+        if (!disk || !disk.mounted) {
+            return E('span', { 'style': 'color:#6c757d' }, _('Not mounted'));
+        }
+        var pct   = disk.total_kb > 0
+            ? Math.round((disk.used_kb / disk.total_kb) * 100) : 0;
+        var free  = this._fmtKb(disk.avail_kb);
+        var total = this._fmtKb(disk.total_kb);
+        var bar   = E('div', {
+            'style': 'margin-top:4px;height:4px;width:160px;background:#dee2e6;border-radius:2px'
+        }, [E('div', {
+            'style': 'height:100%;width:' + pct + '%;background:' +
+                     (pct > 90 ? '#dc3545' : pct > 70 ? '#ffc107' : '#28a745') +
+                     ';border-radius:2px;transition:width 0.3s'
+        })]);
+        return E('span', {}, [
+            E('span', { 'style': 'color:#28a745;font-weight:bold' }, '\u25cf\u00a0'),
+            free + '\u00a0' + _('free of') + '\u00a0' + total +
+                '\u00a0(' + pct + '%\u00a0' + _('used') + ')',
+            E('br'),
+            bar,
+            E('small', { 'style': 'color:#6c757d' }, disk.mount)
+        ]);
+    },
+
+    _fmtKb: function(kb) {
+        if (kb >= 1048576) return (kb / 1048576).toFixed(1) + '\u00a0GB';
+        if (kb >= 1024)    return Math.round(kb / 1024)     + '\u00a0MB';
+        return kb + '\u00a0KB';
+    },
+
+    // ── [FIX-Q] Button busy state — updated for toggle button ID ─────────────
+    // Removed defunct ar-btn-start / ar-btn-stop; added ar-btn-toggle.
+    // null-guard (if el) ensures this is safe if any element is temporarily
+    // absent from the DOM.
+    _setBusy: function(busy) {
+        ['ar-btn-toggle', 'ar-btn-probe',
+         'ar-btn-savecfg', 'ar-btn-clearcfg'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) el.disabled = busy;
+        });
+    },
+
+    // ── [FIX-O][FIX-P] Toggle button appearance updater ──────────────────────
+    // Called from _refreshStatus (after actions) and from the poll callback.
+    // Skips update if button is currently disabled (action in progress) to
+    // prevent a poll-cycle race from re-enabling the button prematurely.
+    _updateToggle: function(running) {
+        var btn = document.getElementById('ar-btn-toggle');
+        if (!btn || btn.disabled) return;
+        if (running) {
+            btn.textContent  = _('STOP');
+            btn.style.cssText = 'min-width:90px;font-weight:bold;color:#fff;' +
+                                'background:#dc3545;border-color:#dc3545';
+            btn.className = 'btn cbi-button cbi-button-negative';
+        } else {
+            btn.textContent  = _('START');
+            btn.style.cssText = 'min-width:90px;font-weight:bold;color:#fff;' +
+                                'background:#28a745;border-color:#28a745';
+            btn.className = 'btn cbi-button cbi-button-apply';
+        }
+    },
+
+    // ── Status + toggle refresh helper ───────────────────────────────────────
+    // Called immediately after every start/stop action ([FIX-4] from v4.5).
+    // Now also refreshes the toggle button via _updateToggle [FIX-P].
+    _refreshStatus: function() {
+        var self = this;
+        return callStatus().catch(function() {
+            return { running: false, pid: 0 };
+        }).then(function(status) {
+            var sc = document.getElementById('ar-status-cell');
+            if (sc) dom.content(sc, self._statusBadge(status));
+            // [FIX-P] Sync toggle button to refreshed status
+            self._updateToggle(!!(status && status.running));
+        });
+    },
+
+    // ── [FIX-O] Single toggle action ─────────────────────────────────────────
+    // Determines intent from the current button label (STOP = service running,
+    // START = service stopped) to avoid a separate running-state RPC call.
+    // Double-click safe: _setBusy(true) disables the button synchronously
+    // before any async operation begins.
+    _doToggle: function() {
+        var self = this;
+        var btn  = document.getElementById('ar-btn-toggle');
+        // Guard: reject if button missing or already disabled (in-flight action).
+        if (!btn || btn.disabled) return;
+        var willStop = (btn.textContent.trim() === _('STOP'));
+        self._setBusy(true);
+        var action = willStop ? callStop() : callStart();
+        return action.then(function(res) {
+            if (!res || res.result === 'failed') {
+                window.alert(willStop
+                    ? _('Failed to stop recorder. Check system logs.')
+                    : _('Failed to start recorder. Check system logs.'));
+            }
+        }).catch(function(err) {
+            window.alert(_('RPC error: ') + (err.message || String(err)));
+        }).then(function() {
+            // Immediate badge + toggle refresh regardless of action outcome.
+            return self._refreshStatus();
+        }).then(function() {
+            self._setBusy(false);
+        });
+    },
+
+    // ── [FIX-R] Probe action ──────────────────────────────────────────────────
+    // Distinguishes three response states:
+    //   recorder_running  → blocked by active service
+    //   probe_warnings    → arecord exited non-zero (e.g. card absent)
+    //   ""                → clean success
+    _doProbe: function() {
+        var self = this;
+        var pre  = document.getElementById('ar-probe-output');
+        if (!pre) return;
+        pre.style.display = 'block';
+        pre.textContent   = _('Querying hardware\u2026');
+        self._setBusy(true);
+        return callProbe().then(function(res) {
+            if (res.error === 'recorder_running') {
+                pre.textContent = _('Cannot probe: stop the recorder first.');
+            } else if (res.error === 'probe_warnings') {
+                pre.textContent = _('[Probe completed with warnings — check hw:card,device below]\n\n') +
+                                  (res.output || _('(no output)'));
+            } else {
+                pre.textContent = res.output || _('(no output)');
+            }
+        }).catch(function(err) {
+            pre.textContent = _('RPC error: ') + (err.message || String(err));
+        }).then(function() { self._setBusy(false); });
+    },
+
+    _doSaveConfig: function() {
+        var self   = this;
+        var card   = (document.getElementById('ar-cfg-card')   || {}).value || '';
+        var device = (document.getElementById('ar-cfg-device') || {}).value || '';
+        var mount  = (document.getElementById('ar-cfg-mount')  || {}).value || '';
+
+        if ((card   !== '' && !/^\d+$/.test(card)) ||
+            (device !== '' && !/^\d+$/.test(device))) {
+            window.alert(_('Card and Device must be numeric (or empty for auto-detect).'));
+            return;
+        }
+
+        self._setBusy(true);
+        return callSetConfig(card, device, mount).then(function(res) {
+            if (!res || res.result === 'invalid_mount') {
+                window.alert(_('Invalid mount path: must be an absolute path (e.g.\u00a0/tmp/mnt).'));
+                self._setBusy(false);
+                return;
+            }
+            var btn = document.getElementById('ar-btn-savecfg');
+            if (btn) {
+                var orig = btn.textContent;
+                btn.textContent = _('Saved \u2713');
+                setTimeout(function() { btn.textContent = orig; self._setBusy(false); }, 1800);
+            } else {
+                self._setBusy(false);
+            }
+        }).catch(function(err) {
+            window.alert(_('RPC error: ') + (err.message || String(err)));
+            self._setBusy(false);
+        });
+    },
+
+    _doClearConfig: function() {
+        var self = this;
+        ['ar-cfg-card', 'ar-cfg-device', 'ar-cfg-mount'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) el.value = '';
+        });
+        self._setBusy(true);
+        return callSetConfig('', '', '').then(function(res) {
+            if (!res || res.result === 'invalid_mount') {
+                window.alert(_('Unexpected error clearing config.'));
+                self._setBusy(false);
+                return;
+            }
+            var btn = document.getElementById('ar-btn-clearcfg');
+            if (btn) {
+                var orig = btn.textContent;
+                btn.textContent = _('Cleared \u2713');
+                setTimeout(function() { btn.textContent = orig; self._setBusy(false); }, 1800);
+            } else {
+                self._setBusy(false);
+            }
+        }).catch(function(err) {
+            window.alert(_('RPC error: ') + (err.message || String(err)));
+            self._setBusy(false);
+        });
+    },
+
+    // Suppress default LuCI save/apply/reset footer — no UCI map here
+    handleSaveApply: null,
+    handleSave:      null,
+    handleReset:     null
+});
+EOF_JS
+OK "/www/luci-static/resources/view/autorecorder/main.js"
+
+# ── LuCI menu entry ───────────────────────────────────────────────────────────
+mkdir -p /usr/share/luci/menu.d
+cat > /usr/share/luci/menu.d/autorecorder.json << 'EOF_MENU'
+{
+    "admin/services/autorecorder": {
+        "title": "ALSA Recorder",
+        "order": 60,
+        "action": {
+            "type": "view",
+            "path": "autorecorder/main"
+        },
+        "depends": {
+            "acl": [ "luci-app-autorecorder" ]
+        }
+    }
+}
+EOF_MENU
+OK "/usr/share/luci/menu.d/autorecorder.json"
+
+# ── rpcd ACL ──────────────────────────────────────────────────────────────────
+mkdir -p /usr/share/rpcd/acl.d
+cat > /usr/share/rpcd/acl.d/autorecorder.json << 'EOF_ACL'
+{
+    "luci-app-autorecorder": {
+        "description": "Grant access to ALSA Recorder controls",
+        "read": {
+            "ubus": {
+                "autorecorder": [ "status", "probe", "disk_status", "get_config" ]
+            }
+        },
+        "write": {
+            "ubus": {
+                "autorecorder": [ "start", "stop", "set_config" ]
+            }
+        }
+    }
+}
+EOF_ACL
+OK "/usr/share/rpcd/acl.d/autorecorder.json"
+
+# ── /etc/config/autorecorder ──────────────────────────────────────────────────
+if [ -f /etc/config/autorecorder ]; then
+    OK "/etc/config/autorecorder (already exists — preserving settings)"
+else
+    cat > /etc/config/autorecorder << 'EOF_UCI'
+config autorecorder 'config'
+	option mount '/tmp/mnt'
+EOF_UCI
+    OK "/etc/config/autorecorder"
+fi
+
+# ── 3. Permissions ────────────────────────────────────────────────────────────
+STEP "Setting permissions"
+chmod 0755 /usr/sbin/recorder
+chmod 0755 /etc/init.d/autorecorder
+chmod 0755 /etc/hotplug.d/block/50-autorecorder
+chmod 0755 /etc/hotplug.d/usb/50-autorecorder
+chmod 0755 /usr/libexec/rpcd/autorecorder
+chmod 0644 /www/luci-static/resources/view/autorecorder/main.js
+chmod 0644 /usr/share/luci/menu.d/autorecorder.json
+chmod 0644 /usr/share/rpcd/acl.d/autorecorder.json
+chmod 0644 /etc/config/autorecorder
+OK "Permissions set"
+
+# ── 4. Enable and start service ───────────────────────────────────────────────
+STEP "Enabling and starting autorecorder service"
+/etc/init.d/autorecorder enable
+OK "Autorecorder enabled (starts on boot at S99)"
+/etc/init.d/autorecorder start
+OK "Autorecorder started"
+
+# ── 5. Restart rpcd ───────────────────────────────────────────────────────────
+STEP "Restarting rpcd"
+/etc/init.d/rpcd restart
+sleep 1
+
+if ubus list autorecorder >/dev/null 2>&1; then
+    OK "rpcd plugin registered — ubus list autorecorder"
+else
+    WARN "rpcd restarted but autorecorder not listed yet — retry: /etc/init.d/rpcd restart"
+fi
+
+# ── 6. Clear LuCI caches ──────────────────────────────────────────────────────
+STEP "Clearing LuCI caches"
+rm -f /tmp/luci-indexcache* /tmp/luci-modulecache* 2>/dev/null || true
+OK "LuCI caches cleared"
+
+# ── 7. Summary ────────────────────────────────────────────────────────────────
+printf "\n${BOLD}${GREEN}============================================${RESET}\n"
+printf "${BOLD}${GREEN}  hALSAmrec v4.6 — Installation complete!${RESET}\n"
+printf "${BOLD}${GREEN}============================================${RESET}\n"
+printf "\n"
+printf "  ${BOLD}LuCI${RESET}   ->  Services -> ALSA Recorder\n"
+printf "  ${BOLD}Status${RESET} ->  ubus call autorecorder status\n"
+printf "  ${BOLD}Disk${RESET}   ->  ubus call autorecorder disk_status\n"
+printf "  ${BOLD}Config${RESET} ->  ubus call autorecorder get_config\n"
+printf "  ${BOLD}Probe${RESET}  ->  ubus call autorecorder probe\n"
+printf "\n"
+printf "  ${BOLD}Key fixes in v4.6:${RESET}\n"
+printf "    [A] Disk stays mounted for supervisor lifetime (no more unmount races)\n"
+printf "    [B] UUID-based device resolution (stable across USB reconnects)\n"
+printf "    [J] procd respawn enabled (service auto-restarts on unexpected exit)\n"
+printf "    [O] Single START/STOP toggle button in LuCI\n"
+printf "    [M] Probe returns ALSA + storage + block device diagnostics\n"
+printf "\n"
+printf "  ${BOLD}Hotplug${RESET} handlers installed:\n"
+printf "    /etc/hotplug.d/block/50-autorecorder  (USB storage)\n"
+printf "    /etc/hotplug.d/usb/50-autorecorder    (USB audio)\n"
+printf "\n"
+printf "  ${YELLOW}Note:${RESET} Card/device indices are auto-detected and persisted\n"
+printf "  to UCI after the first successful recording cycle.\n"
+printf "  Override manually via LuCI or:\n"
+printf "    uci set autorecorder.config.card=0\n"
+printf "    uci set autorecorder.config.device=0\n"
+printf "    uci commit autorecorder\n"
+printf "\n"
