@@ -47,7 +47,7 @@ case "$CMND" in
         if is_running; then
             echo "WARNING: recorder is running, stop to probe!"
         else
-            arecord -D "hw:0,0" --dump-hw-params 2>&1
+            arecord -l 2>/dev/null | grep '^card' | head -n 1
         fi
         ;;
     *)
