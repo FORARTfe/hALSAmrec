@@ -14,10 +14,18 @@ PACKAGES="alsa-utils kmod-usb-storage block-mount kmod-usb3 kmod-usb-audio usbut
 echo "[*] Installing required packages..."
 # OpenWrt 25.12+ uses apk instead of opkg
 if command -v apk >/dev/null 2>&1; then
-    echo "[*] OpenWrt 25+ detected. Using 'apk' package manager..."
-    apk --update-cache add $PACKAGES
+     echo "WARNING: OpenWrt version 25+ detected"
+     echo "Even if hALSAmrec works on it, we do not recommend at the moment !"
+     printf "Do you really want install ? [y/N]:"
+        read confirm
+        case "$confirm" in
+            [yY]*) echo "[*] OpenWrt v25+ needed packages install:"
+                   apk --update-cache add $PACKAGES ;;
+            *)     echo "[-] Installation aborted by user."; exit 1 ;;
+        esac
+fi
 elif command -v opkg >/dev/null 2>&1; then
-    echo "[*] Older OpenWrt detected. Using 'opkg' package manager..."
+    echo "[*] Installing needed packages:"
     opkg update
     opkg install $PACKAGES
 else
