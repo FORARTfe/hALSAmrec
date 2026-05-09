@@ -23,7 +23,6 @@ if command -v apk >/dev/null 2>&1; then
                    apk --update-cache add $PACKAGES ;;
             *)     echo "[-] Installation aborted by user."; exit 1 ;;
         esac
-fi
 elif command -v opkg >/dev/null 2>&1; then
     echo "[*] Installing needed packages:"
     opkg update
