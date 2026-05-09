@@ -47,7 +47,10 @@ case "$CMND" in
         if is_running; then
             echo "WARNING: recorder is running, stop to probe!"
         else
-            arecord -l 2>/dev/null | grep '^card' | head -n 1
+            card_line=$(arecord -l 2>/dev/null | grep '^card' | head -n 1)
+            card_num=$(printf '%s\n' "$card_line" | sed 's/^card \([0-9]*\):.*/\1/')
+            dev_num=$( printf '%s\n' "$card_line" | sed 's/.*device \([0-9]*\):.*/\1/')
+            arecord -D "hw:${card_num},${dev_num}" --dump-hw-params 2>&1
         fi
         ;;
     *)
