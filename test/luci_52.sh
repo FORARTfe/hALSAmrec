@@ -1,26 +1,42 @@
 #!/bin/sh
 #
-# hALSAmrec LuCI/CGI installer v51
-# Fully fixed ALSA/OpenWrt BusyBox-compatible edition.
+# hALSAmrec LuCI/CGI installer v52
+# CLI + CGI + LuCI — full stack, single installer.
 #
-# Based on original work by J. Bruce Fields.
-# Port/fixes by FORART.
+# Original recorder daemon by J. Bruce Fields, 2024.
+# LuCI/CGI port and OpenWrt fixes by FORART, 2025-26.
 #
-# Major v51 fixes:
-# - robust ALSA detection
-# - BusyBox ash compatibility
-# - fixed probe failures
-# - fixed parser regressions
-# - fixed USB audio edge cases
-# - fixed localized ALSA output handling
-# - safer recorder lifecycle handling
+# v52 merge notes (relative to v50 and v51):
+#   Restored from v50 (lost in v51):
+#     - RPCD backend  /usr/libexec/rpcd/autorecorder
+#     - LuCI JS view  /www/luci-static/resources/view/autorecorder/main.js
+#     - LuCI menu     /usr/share/luci/menu.d/autorecorder.json
+#     - RPCD ACL      /usr/share/rpcd/acl.d/autorecorder.json
+#     - backup_file() coverage of all installed paths
+#     - mkdir -p for LuCI/RPCD directories
+#     - controlweb_cgi symlink → /www/cgi-bin/cm
+#     - logger calls in hotplug handlers
+#     - arecord binary sanity-check at end of install
+#     - robust get_param() in CGI (vs. fragile awk field-split)
+#   Kept from v51:
+#     - Extended package list (usbutils, kmod-usb-audio,
+#       kmod-usb-storage, block-mount)
+#     - Robust awk-based find_audio_device() returning "card:dev"
+#       (immune to localized arecord -l output and spacing variations)
+#     - Clean card/dev splitting via ${audio_dev%%:*} / ${audio_dev##*:}
+#     - sleep 2 guard in recorder main loop to prevent busy-spin when
+#       audio/storage is absent
+#     - probe_device() uses the same awk parser + shows raw arecord -l
+#       output for diagnosis when no device is found
+#
+# GPL v3 — see <https://www.gnu.org/licenses/>
 #
 
 set -eu
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 
 APP_NAME="hALSAmrec"
-VERSION="5.1-fixed"
+VERSION="5.2"
 
 info() { printf '%s\n' ">>> $*"; }
 warn() { printf '%s\n' "WARNING: $*" >&2; }
@@ -39,7 +55,6 @@ install_packages() {
     }
 
     missing=""
-
     for pkg in \
         rpcd \
         luci-base \
@@ -57,14 +72,16 @@ install_packages() {
 
     if [ -n "$missing" ]; then
         info "Installing missing packages:$missing"
-        opkg update || warn "opkg update failed"
-        opkg install $missing || warn "Some packages failed to install"
+        opkg update || warn "opkg update failed; trying installation anyway."
+        opkg install $missing || warn "Some packages could not be installed: $missing"
     fi
 }
 
 info "$APP_NAME installer $VERSION"
+info "Checking packages..."
 install_packages
 
+info "Creating directories..."
 mkdir -p \
     /usr/sbin \
     /etc/init.d \
@@ -76,6 +93,7 @@ mkdir -p \
     /www/luci-static/resources/view/autorecorder \
     /www/cgi-bin
 
+info "Backing up existing files..."
 for f in \
     /usr/sbin/recorder \
     /usr/sbin/autorecorderctl \
@@ -83,18 +101,25 @@ for f in \
     /etc/hotplug.d/block/49-autorecorder \
     /etc/hotplug.d/usb/49-autorecorder \
     /usr/libexec/rpcd/autorecorder \
+    /usr/share/rpcd/acl.d/autorecorder.json \
+    /usr/share/luci/menu.d/autorecorder.json \
+    /www/luci-static/resources/view/autorecorder/main.js \
     /www/cgi-bin/cm
-
 do
     backup_file "$f"
 done
 
-##############################################################################
-# RECORDER
-##############################################################################
-
+# ---------------------------------------------------------
+# 1. Recorder daemon
+# ---------------------------------------------------------
+info "Installing recorder daemon..."
 cat > /usr/sbin/recorder <<'EOF_RECORDER'
 #!/bin/sh
+#
+# hALSAmrec recorder daemon
+# Original by J. Bruce Fields, 2024.
+# OpenWrt/LuCI/CGI port by FORART, 2025-26.
+# GPL v3 — see <https://www.gnu.org/licenses/>
 
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 MNT=/tmp/mnt
@@ -102,6 +127,7 @@ recorder=""
 dummy=""
 
 on_hup() {
+    # procd reload/hotplug sends SIGHUP; the trap wakes wait().
     :
 }
 
@@ -121,11 +147,7 @@ cleanup_mount() {
 
 on_term() {
     cleanup_recorder
-
-    if [ -n "${dummy:-}" ]; then
-        kill "$dummy" 2>/dev/null || true
-    fi
-
+    [ -n "${dummy:-}" ] && kill "$dummy" 2>/dev/null || true
     cleanup_mount
     exit 0
 }
@@ -133,9 +155,13 @@ on_term() {
 trap on_hup HUP
 trap on_term INT TERM
 
+# BusyBox sleep does not reliably support "infinity" on all OpenWrt builds.
 sleep 2147483647 &
 dummy=$!
 
+# Returns "card_num:dev_num" for the first detected ALSA capture device,
+# or nothing if none is found.  Uses awk to avoid fragile shell string ops
+# on localized arecord -l output.
 find_audio_device() {
     command -v arecord >/dev/null 2>&1 || return 1
 
@@ -146,12 +172,12 @@ find_audio_device() {
             dev=""
 
             if (match($0, /card[[:space:]]+[0-9]+/)) {
-                card=substr($0, RSTART, RLENGTH)
+                card = substr($0, RSTART, RLENGTH)
                 sub(/.* /, "", card)
             }
 
             if (match($0, /device[[:space:]]+[0-9]+/)) {
-                dev=substr($0, RSTART, RLENGTH)
+                dev = substr($0, RSTART, RLENGTH)
                 sub(/.* /, "", dev)
             }
 
@@ -163,6 +189,9 @@ find_audio_device() {
     '
 }
 
+# Scans /proc/partitions for a block device whose first 5 bytes (offset 3)
+# contain "EXFAT".  Returns the device path only when exactly one such
+# partition exists.
 find_single_exfat_partition() {
     count=0
     found=""
@@ -176,6 +205,8 @@ find_single_exfat_partition() {
         dev="/dev/$name"
         [ -b "$dev" ] || continue
 
+        # dd outputs exactly 5 raw bytes; plain substring match is safer
+        # than anchored patterns on BusyBox grep.
         if dd if="$dev" bs=1 skip=3 count=5 2>/dev/null | grep -q 'EXFAT'; then
             count=$((count + 1))
             found="$dev"
@@ -187,17 +218,13 @@ find_single_exfat_partition() {
 
 last_number_from_line() {
     label=$1
-
     printf '%s\n' "$arecord_out" |
     awk -v label="$label" '
         index($0, label ":") == 1 {
             gsub(/[^0-9]+/, " ", $0)
             n = split($0, a, /[ ]+/)
             for (i = n; i >= 1; i--) {
-                if (a[i] != "") {
-                    print a[i]
-                    exit
-                }
+                if (a[i] != "") { print a[i]; exit }
             }
         }
     '
@@ -211,10 +238,7 @@ format_from_dump() {
             gsub(/[\[\]]/, "", $0)
             n = split($0, a, /[ \t]+/)
             for (i = n; i >= 1; i--) {
-                if (a[i] != "") {
-                    print a[i]
-                    exit
-                }
+                if (a[i] != "") { print a[i]; exit }
             }
         }
     '
@@ -228,9 +252,7 @@ valid_uint() {
 }
 
 first=1
-
 while :; do
-
     if [ "$first" -eq 1 ]; then
         first=0
     else
@@ -240,11 +262,13 @@ while :; do
     audio_dev=$(find_audio_device || true)
     disk=$(find_single_exfat_partition || true)
 
+    # Reap recorder PID if it exited on its own.
     if [ -n "${recorder:-}" ] && [ ! -e "/proc/$recorder" ]; then
         recorder=""
         cleanup_mount
     fi
 
+    # Not ready: audio or storage missing — sleep to avoid busy-spin.
     if [ -z "$audio_dev" ] || [ -z "$disk" ]; then
         cleanup_recorder
         cleanup_mount
@@ -252,22 +276,22 @@ while :; do
         continue
     fi
 
+    # Recorder already active; wait for it (or dummy) above.
     [ -n "${recorder:-}" ] && continue
 
     card_num=${audio_dev%%:*}
     dev_num=${audio_dev##*:}
 
     valid_uint "$card_num" || continue
-    valid_uint "$dev_num" || continue
+    valid_uint "$dev_num"  || continue
 
     mkdir -p "$MNT"
-
     if ! grep -qs " $MNT " /proc/mounts; then
         mount "$disk" "$MNT" || continue
     fi
 
+    # Require at least 100 MB free before starting a new recording.
     avail_kb=$(df -k "$MNT" 2>/dev/null | awk 'NR == 2 { print $4 }')
-
     if ! valid_uint "${avail_kb:-}" || [ "$avail_kb" -le 102400 ]; then
         cleanup_mount
         sleep 5
@@ -282,12 +306,9 @@ while :; do
     buf_time=$(last_number_from_line BUFFER_TIME)
     buf_size=$(last_number_from_line BUFFER_SIZE)
 
-    valid_uint "$max_ch" || max_ch=1
-
-    [ -n "$bitfmt" ] || bitfmt=S16_LE
-
+    valid_uint "$max_ch"   || max_ch=1
+    [ -n "$bitfmt" ]       || bitfmt=S16_LE
     valid_uint "$max_rate" || max_rate=48000
-
     [ "$max_rate" -gt 48000 ] && max_rate=48000
 
     outfile="${MNT}/$(date +%s)_${max_ch}-${max_rate}-${bitfmt}.raw"
@@ -315,15 +336,15 @@ while :; do
     recorder=$!
 done
 EOF_RECORDER
-
 chmod 0755 /usr/sbin/recorder
 
-##############################################################################
-# CONTROL CLI
-##############################################################################
-
+# ---------------------------------------------------------
+# 2. Shared control CLI (used by CGI and RPCD)
+# ---------------------------------------------------------
+info "Installing control CLI..."
 cat > /usr/sbin/autorecorderctl <<'EOF_CTL'
 #!/bin/sh
+# hALSAmrec control helper: START, STOP, STATUS, PROBE.
 
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 RECORDER=/usr/sbin/recorder
@@ -337,9 +358,7 @@ find_pids() {
 
     for proc in /proc/[0-9]*; do
         [ -r "$proc/cmdline" ] || continue
-
         cmd=$(tr '\000' ' ' < "$proc/cmdline" 2>/dev/null || true)
-
         case "$cmd" in
             *"$RECORDER"*) printf '%s\n' "${proc#/proc/}" ;;
         esac
@@ -355,6 +374,8 @@ is_running() {
     [ -n "$(pid_list)" ]
 }
 
+# Returns "card_num:dev_num" for the first detected ALSA capture device.
+# Mirrors find_audio_device() in the recorder daemon.
 first_audio_device() {
     command -v arecord >/dev/null 2>&1 || return 1
 
@@ -365,12 +386,12 @@ first_audio_device() {
             dev=""
 
             if (match($0, /card[[:space:]]+[0-9]+/)) {
-                card=substr($0, RSTART, RLENGTH)
+                card = substr($0, RSTART, RLENGTH)
                 sub(/.* /, "", card)
             }
 
             if (match($0, /device[[:space:]]+[0-9]+/)) {
-                dev=substr($0, RSTART, RLENGTH)
+                dev = substr($0, RSTART, RLENGTH)
                 sub(/.* /, "", dev)
             }
 
@@ -392,6 +413,7 @@ probe_device() {
 
     if [ -z "$audio_dev" ]; then
         echo "No ALSA capture device found"
+        echo "--- arecord -l output ---"
         arecord -l 2>&1 || true
         return 1
     fi
@@ -410,69 +432,56 @@ case "$cmd" in
             echo "Already running"
             exit 0
         fi
-
         "$INIT" start >/dev/null 2>&1 || true
         sleep 2
-
         if is_running; then
             echo "Started successfully"
             exit 0
         fi
-
         echo "Failed to start"
         exit 1
         ;;
-
     STOP)
         if ! is_running; then
             echo "Already stopped"
             exit 0
         fi
-
         "$INIT" stop >/dev/null 2>&1 || true
         sleep 2
-
         if is_running; then
             echo "Failed to stop"
             exit 1
         fi
-
         echo "Stopped successfully"
         exit 0
         ;;
-
     STATUS)
         pids=$(pid_list)
-
         if [ -n "$pids" ]; then
             echo "RUNNING (PID: $pids)"
         else
             echo "STOPPED"
         fi
         ;;
-
     PROBE)
         if is_running; then
-            echo "WARNING: recorder is running, stop to probe!"
+            echo "WARNING: recorder is running, stop first to probe!"
             exit 1
         fi
-
         probe_device
         ;;
-
     *)
         echo "Usage: $0 START|STOP|STATUS|PROBE"
         exit 1
         ;;
 esac
 EOF_CTL
-
 chmod 0755 /usr/sbin/autorecorderctl
 
-##############################################################################
-# INIT SCRIPT
-##############################################################################
-
+# ---------------------------------------------------------
+# 3. Init script (procd)
+# ---------------------------------------------------------
+info "Installing init script..."
 cat > /etc/init.d/autorecorder <<'EOF_INIT'
 #!/bin/sh /etc/rc.common
 
@@ -491,36 +500,38 @@ start_service() {
 }
 
 reload_service() {
+    # Sends SIGHUP; the recorder loop wakes and re-checks audio/storage.
     procd_send_signal autorecorder
 }
 EOF_INIT
-
 chmod 0755 /etc/init.d/autorecorder
 
-##############################################################################
-# HOTPLUG
-##############################################################################
-
-cat > /etc/hotplug.d/block/49-autorecorder <<'EOF_BLOCK'
+# ---------------------------------------------------------
+# 4. Hotplug handlers
+# ---------------------------------------------------------
+info "Installing hotplug handlers..."
+cat > /etc/hotplug.d/block/49-autorecorder <<'EOF_HOTPLUG_BLOCK'
 #!/bin/sh
+logger -t autorecorder "block hotplug: ${ACTION:-unknown} ${DEVNAME:-unknown}"
 service autorecorder reload
-EOF_BLOCK
-
+EOF_HOTPLUG_BLOCK
 chmod 0755 /etc/hotplug.d/block/49-autorecorder
 
-cat > /etc/hotplug.d/usb/49-autorecorder <<'EOF_USB'
+cat > /etc/hotplug.d/usb/49-autorecorder <<'EOF_HOTPLUG_USB'
 #!/bin/sh
+logger -t autorecorder "usb hotplug: ${ACTION:-unknown} ${PRODUCT:-unknown}"
 service autorecorder reload
-EOF_USB
-
+EOF_HOTPLUG_USB
 chmod 0755 /etc/hotplug.d/usb/49-autorecorder
 
-##############################################################################
-# CGI
-##############################################################################
-
+# ---------------------------------------------------------
+# 5. CGI endpoint
+# ---------------------------------------------------------
+info "Installing CGI endpoint..."
 cat > /www/cgi-bin/cm <<'EOF_CGI'
 #!/bin/sh
+# hALSAmrec CGI control endpoint.
+# Responds to: /cgi-bin/cm?cmnd=START|STOP|STATUS|PROBE
 
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 CTL=/usr/sbin/autorecorderctl
@@ -528,50 +539,330 @@ CTL=/usr/sbin/autorecorderctl
 echo "Content-type: text/plain"
 echo ""
 
-[ "${REQUEST_METHOD:-}" = "GET" ] || {
-    echo "Method not allowed"
-    exit 1
+[ "${REQUEST_METHOD:-}" = "GET" ] || { echo "Error: Method not allowed"; exit 1; }
+[ -n "${QUERY_STRING:-}" ] || { echo "Usage: /cgi-bin/cm?cmnd=START|STOP|STATUS|PROBE"; exit 0; }
+
+# Robust key=value query-string parser; handles multiple params in any order.
+get_param() {
+    key=$1
+    qs=${QUERY_STRING:-}
+
+    while [ -n "$qs" ]; do
+        pair=${qs%%&*}
+        [ "$pair" = "$qs" ] && qs="" || qs=${qs#*&}
+
+        name=${pair%%=*}
+        value=${pair#*=}
+        [ "$name" = "$key" ] && { printf '%s' "$value"; return 0; }
+    done
+    return 1
 }
 
-cmd=$(printf '%s' "${QUERY_STRING:-}" |
-    awk -F'cmnd=' '{print $2}' |
-    awk -F'&' '{print $1}')
+CMND=$(get_param cmnd 2>/dev/null | tr '[:lower:]' '[:upper:]')
 
-cmd=$(printf '%s' "$cmd" | tr '[:lower:]' '[:upper:]')
-
-case "$cmd" in
+case "$CMND" in
     START|STOP|STATUS|PROBE)
-        "$CTL" "$cmd"
+        "$CTL" "$CMND"
         ;;
     *)
-        echo "Usage: /cgi-bin/cm?cmnd=START|STOP|STATUS|PROBE"
+        printf 'Unknown command: %s\nValid commands: START, STOP, STATUS, PROBE\n' "${CMND:-<empty>}"
         ;;
 esac
 EOF_CGI
-
 chmod 0755 /www/cgi-bin/cm
+ln -sf /www/cgi-bin/cm /www/cgi-bin/controlweb_cgi
 
-##############################################################################
-# FINALIZE
-##############################################################################
+# ---------------------------------------------------------
+# 6. RPCD backend for LuCI
+# ---------------------------------------------------------
+info "Installing RPCD backend..."
+cat > /usr/libexec/rpcd/autorecorder <<'EOF_RPCD'
+#!/bin/sh
+# hALSAmrec rpcd plugin — exposes status/start/stop/probe over ubus.
 
-/etc/init.d/autorecorder enable >/dev/null 2>&1 || true
-/etc/init.d/autorecorder restart >/dev/null 2>&1 || true
-/etc/init.d/rpcd restart >/dev/null 2>&1 || true
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+CTL=/usr/sbin/autorecorderctl
+RECORDER=/usr/sbin/recorder
+
+. /usr/share/libubox/jshn.sh
+
+find_pids() {
+    if command -v pgrep >/dev/null 2>&1; then
+        pgrep -f "$RECORDER" 2>/dev/null || true
+        return 0
+    fi
+
+    for proc in /proc/[0-9]*; do
+        [ -r "$proc/cmdline" ] || continue
+        cmd=$(tr '\000' ' ' < "$proc/cmdline" 2>/dev/null || true)
+        case "$cmd" in
+            *"$RECORDER"*) printf '%s\n' "${proc#/proc/}" ;;
+        esac
+    done
+}
+
+pid_list() {
+    find_pids |
+    awk 'NF { printf "%s%s", sep, $1; sep=" " } END { print "" }'
+}
+
+json_bool() {
+    name=$1; value=$2
+    if [ "$value" -eq 1 ] 2>/dev/null; then
+        json_add_boolean "$name" 1
+    else
+        json_add_boolean "$name" 0
+    fi
+}
+
+reply_status() {
+    pids=$(pid_list)
+    json_init
+    if [ -n "$pids" ]; then
+        json_bool running 1
+        json_add_string status "RUNNING"
+        json_add_string pid    "$pids"
+        json_add_string text   "RUNNING (PID: $pids)"
+    else
+        json_bool running 0
+        json_add_string status "STOPPED"
+        json_add_string pid    ""
+        json_add_string text   "STOPPED"
+    fi
+    json_dump
+}
+
+reply_command() {
+    command=$1
+    output=$($CTL "$command" 2>&1)
+    rc=$?
+    pids=$(pid_list)
+
+    json_init
+    [ "$rc" -eq 0 ] && json_bool success 1 || json_bool success 0
+    [ -n "$pids" ]  && json_bool running 1 || json_bool running 0
+    json_add_string message "$output"
+    json_add_string pid     "$pids"
+    json_dump
+}
+
+reply_probe() {
+    output=$($CTL PROBE 2>&1)
+    rc=$?
+
+    json_init
+    [ "$rc" -eq 0 ] && json_bool success 1 || json_bool success 0
+    json_add_string message "$output"
+    json_add_string output  "$output"
+    json_dump
+}
+
+case "${1:-}" in
+    list)
+        echo '{"status":{},"start":{},"stop":{},"probe":{}}'
+        ;;
+    call)
+        case "${2:-}" in
+            status) reply_status    ;;
+            start)  reply_command START ;;
+            stop)   reply_command STOP  ;;
+            probe)  reply_probe         ;;
+            *)
+                json_init
+                json_bool success 0
+                json_add_string error "Unknown method: ${2:-}"
+                json_dump
+                ;;
+        esac
+        ;;
+    *)
+        echo "Usage: $0 list|call <method>" >&2
+        exit 1
+        ;;
+esac
+EOF_RPCD
+chmod 0755 /usr/libexec/rpcd/autorecorder
+
+# ---------------------------------------------------------
+# 7. LuCI frontend
+# ---------------------------------------------------------
+info "Installing LuCI frontend..."
+cat > /www/luci-static/resources/view/autorecorder/main.js <<'EOF_LUCI_JS'
+'use strict';
+'require view';
+'require rpc';
+'require poll';
+'require ui';
+
+var callStatus = rpc.declare({ object: 'autorecorder', method: 'status' });
+var callStart  = rpc.declare({ object: 'autorecorder', method: 'start'  });
+var callStop   = rpc.declare({ object: 'autorecorder', method: 'stop'   });
+var callProbe  = rpc.declare({ object: 'autorecorder', method: 'probe'  });
+
+return view.extend({
+    render: function() {
+        var statusBadge = E('span', { 'class': 'badge' }, _('Unknown'));
+        var statusText  = E('pre',  { 'style': 'white-space: pre-wrap; margin-top: 1em;' }, _('Loading...'));
+        var probeOutput = E('pre',  { 'style': 'white-space: pre-wrap; margin-top: 1em; display: none;' });
+        var buttons = [];
+
+        function setBadge(running, label) {
+            statusBadge.textContent        = label || (running ? _('RUNNING') : _('STOPPED'));
+            statusBadge.style.color           = '#fff';
+            statusBadge.style.backgroundColor = running ? '#37a237' : '#a93737';
+        }
+
+        function refreshStatus() {
+            return callStatus().then(function(data) {
+                var running = !!data.running;
+                setBadge(running, data.status || (running ? 'RUNNING' : 'STOPPED'));
+                statusText.textContent = data.text || (running ? 'RUNNING' : 'STOPPED');
+            }).catch(function(err) {
+                setBadge(false, _('ERROR'));
+                statusText.textContent = _('Unable to read recorder status: ') + err;
+            });
+        }
+
+        function setButtonsDisabled(disabled) {
+            for (var i = 0; i < buttons.length; i++)
+                buttons[i].disabled = disabled;
+        }
+
+        function runCommand(fn, doneMessage, showProbe) {
+            setButtonsDisabled(true);
+            probeOutput.style.display = 'none';
+
+            return fn().then(function(res) {
+                var msg = res.message || doneMessage;
+                ui.addNotification(null, E('p', {}, msg),
+                    res.success === false ? 'warning' : 'info');
+                if (showProbe) {
+                    probeOutput.style.display  = '';
+                    probeOutput.textContent    = res.output || msg;
+                }
+                return refreshStatus();
+            }).catch(function(err) {
+                ui.addNotification(null, E('p', {}, _('Command failed: ') + err), 'danger');
+            }).then(function() {
+                setButtonsDisabled(false);
+            });
+        }
+
+        buttons.push(E('button', {
+            'class': 'btn cbi-button cbi-button-action',
+            'click': function(ev) {
+                ev.preventDefault();
+                return runCommand(callStart, _('Start command sent'), false);
+            }
+        }, _('START')));
+
+        buttons.push(E('button', {
+            'class': 'btn cbi-button cbi-button-negative',
+            'style': 'margin-left: .5em;',
+            'click': function(ev) {
+                ev.preventDefault();
+                return runCommand(callStop, _('Stop command sent'), false);
+            }
+        }, _('STOP')));
+
+        buttons.push(E('button', {
+            'class': 'btn cbi-button cbi-button-neutral',
+            'style': 'margin-left: .5em;',
+            'click': function(ev) {
+                ev.preventDefault();
+                return runCommand(callProbe, _('Probe completed'), true);
+            }
+        }, _('PROBE')));
+
+        refreshStatus();
+        poll.add(refreshStatus, 5);
+
+        return E('div', { 'class': 'cbi-map' }, [
+            E('h2', {}, _('hALSAmrec')),
+            E('div', { 'class': 'cbi-map-descr' },
+                _('Control the autorecorder daemon. Exposes the same START, STOP, STATUS and PROBE functions as the CGI endpoint.')),
+            E('div', { 'class': 'cbi-section' }, [
+                E('h3', {}, _('Status')),
+                statusBadge,
+                statusText,
+                E('div', { 'style': 'margin-top: 1em;' }, buttons),
+                probeOutput
+            ])
+        ]);
+    }
+});
+EOF_LUCI_JS
+chmod 0644 /www/luci-static/resources/view/autorecorder/main.js
+
+# ---------------------------------------------------------
+# 8. LuCI menu entry and RPCD ACL
+# ---------------------------------------------------------
+info "Installing LuCI menu and ACL..."
+cat > /usr/share/luci/menu.d/autorecorder.json <<'EOF_MENU'
+{
+    "admin/system/autorecorder": {
+        "title": "hALSAmrec",
+        "action": {
+            "type": "view",
+            "path": "autorecorder/main"
+        },
+        "depends": {
+            "acl": [ "luci-app-autorecorder" ]
+        }
+    }
+}
+EOF_MENU
+chmod 0644 /usr/share/luci/menu.d/autorecorder.json
+
+cat > /usr/share/rpcd/acl.d/autorecorder.json <<'EOF_ACL'
+{
+    "luci-app-autorecorder": {
+        "description": "Grant LuCI access to hALSAmrec",
+        "read": {
+            "ubus": {
+                "autorecorder": [ "status", "probe" ]
+            }
+        },
+        "write": {
+            "ubus": {
+                "autorecorder": [ "start", "stop" ]
+            }
+        }
+    }
+}
+EOF_ACL
+chmod 0644 /usr/share/rpcd/acl.d/autorecorder.json
+
+# ---------------------------------------------------------
+# 9. Activate services
+# ---------------------------------------------------------
+info "Reloading services..."
+/etc/init.d/rpcd restart    >/dev/null 2>&1 || \
+    service rpcd restart    >/dev/null 2>&1 || \
+    warn "Could not restart rpcd"
+
+/etc/init.d/autorecorder enable  >/dev/null 2>&1 || warn "Could not enable autorecorder"
+/etc/init.d/autorecorder restart >/dev/null 2>&1 || \
+    /etc/init.d/autorecorder start >/dev/null 2>&1 || \
+    warn "Could not start autorecorder"
+
+if ! command -v arecord >/dev/null 2>&1; then
+    warn "arecord is not available. Install alsa-utils before using the recorder."
+fi
 
 cat <<'EOF_DONE'
 
-========================================
-hALSAmrec v51 installed successfully
-========================================
+==========================================
+ hALSAmrec v52 — installation complete
+==========================================
 
-CGI:
-    /cgi-bin/cm?cmnd=STATUS
+LuCI:     System -> hALSAmrec
+CGI:      /cgi-bin/cm?cmnd=START|STOP|STATUS|PROBE
+CGI alt:  /cgi-bin/controlweb_cgi?cmnd=STATUS
+CLI:      autorecorderctl START|STOP|STATUS|PROBE
+Init:     /etc/init.d/autorecorder start|stop|reload|status
 
-CLI:
-    autorecorderctl STATUS
-
-LuCI:
-    System -> hALSAmrec
+Storage:  exactly one exFAT partition required
+Output:   /tmp/mnt/<epoch>_<channels>-<rate>-<format>.raw
 
 EOF_DONE
