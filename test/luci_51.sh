@@ -1,6 +1,3 @@
-# luci_v51.sh — Fully Fixed v51 Installer
-
-```sh
 #!/bin/sh
 #
 # hALSAmrec LuCI/CGI installer v51
@@ -578,5 +575,3 @@ LuCI:
     System -> hALSAmrec
 
 EOF_DONE
-
-```
