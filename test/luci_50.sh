@@ -122,7 +122,7 @@ sleep 2147483647 &
 dummy=$!
 
 find_audio_line() {
-    arecord -l 2>/dev/null | grep '^card ' | head -n 1
+    arecord -l 2>/dev/null | grep '^card' | head -n 1
 }
 
 find_single_exfat_partition() {
@@ -306,7 +306,7 @@ is_running() {
 }
 
 first_audio_device() {
-    arecord -l 2>/dev/null | grep '^card ' | head -n 1
+    arecord -l 2>/dev/null | grep '^card' | head -n 1
 }
 
 probe_device() {
