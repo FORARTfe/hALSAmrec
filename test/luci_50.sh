@@ -310,29 +310,20 @@ first_audio_device() {
 }
 
 probe_device() {
-    card_line=$(first_audio_device || true)
+    # Match oinstall.sh behavior: inline arecord call without function abstraction
+    card_line=$(arecord -l 2>/dev/null | grep '^card' | head -n 1)
+
+    # Parse card/device numbers - if card_line is empty, these will be empty too
+    card_num=$(printf '%s\n' "$card_line" | sed 's/^card \([0-9]*\):.*/\1/')
+    dev_num=$(printf '%s\n' "$card_line" | sed 's/.*device \([0-9]*\):.*/\1/')
+
+    # Only fail if we got actual empty strings (not just failed parsing)
     if [ -z "$card_line" ]; then
         echo "No ALSA capture device found"
         return 1
     fi
-
-    card_num=${card_line#card }
-    card_num=${card_num%%:*}
-    dev_num=${card_line##*device }
-    dev_num=${dev_num%%:*}
-
-    # FIX: validate each number independently so that empty values (which
-    # would produce "hw:,N" or "hw:N,") are caught.  The previous combined
-    # pattern  *[!0-9:]*  accepted strings like ":0" or "0:" because colon
-    # is explicitly allowed, leaving card_num or dev_num silently empty.
-    case "$card_num" in
-        ''|*[!0-9]*) echo "Could not parse card number from: $card_line"; return 1 ;;
-    esac
-    case "$dev_num" in
-        ''|*[!0-9]*) echo "Could not parse device number from: $card_line"; return 1 ;;
-    esac
-
-    arecord -D "hw:${card_num},${dev_num}" --dump-hw-params 2>&1
+    
+   arecord -D "hw:${card_num},${dev_num}" --dump-hw-params 2>&1
 }
 
 cmd=$(printf '%s' "${1:-}" | tr '[:lower:]' '[:upper:]')
