@@ -6,7 +6,7 @@
 
 set -e
 
-BASE_URL="https://raw.githubusercontent.com/FORARTfe/hALSAmrec/main/current"
+BASE_URL="https://raw.githubusercontent.com/FORARTfe/hALSAmrec/tree/main/old/v2"
 TMPDIR="/tmp/hALSAmrec-install.$$"
 PACKAGES="alsa-utils kmod-usb-storage block-mount kmod-usb3 kmod-usb-audio usbutils kmod-fs-exfat"
 
