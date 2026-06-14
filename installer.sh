@@ -547,7 +547,7 @@ for cmd in START STOP STATUS PROBE; do
     echo "    http://${LAN_IP}/cgi-bin/cm?cmnd=${cmd}"
 done
 echo ""
-echo "    LuCI:  System -> hALSAmrec"
+echo "    LuCI:  hALSAmrec"
 echo "    CLI:   autorecorderctl START|STOP|STATUS|PROBE"
 echo "    Init:  /etc/init.d/autorecorder start|stop|reload|status"
 echo "    Out:   /tmp/mnt/<epoch>_<ch>-<rate>-<fmt>.raw"
