@@ -510,7 +510,7 @@ chmod 0644 /www/luci-static/resources/view/autorecorder/main.js
 echo "[*] Installing LuCI menu and ACL..."
 cat > /usr/share/luci/menu.d/autorecorder.json <<'EOF_MENU'
 {
-    "admin/system/autorecorder": {
+    "admin/autorecorder": {
         "title": "hALSAmrec",
         "action": { "type": "view", "path": "autorecorder/main" },
         "depends": { "acl": [ "luci-app-autorecorder" ] }
