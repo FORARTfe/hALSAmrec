@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# hALSAmrec LuCI/CGI installer v3.1
+# hALSAmrec installer v3.1
 # CLI + CGI + LuCI — full stack, single installer.
 #
 # Original recorder daemon by J. Bruce Fields, 2024.
