@@ -530,14 +530,13 @@ LAN_IP=$(uci get network.lan.ipaddr 2>/dev/null || echo '<your-ip>')
 
 echo ""
 echo "[*] Installation complete. Available endpoints:"
+echo "    CGI ¦"
 for cmd in START STOP STATUS PROBE; do
-    echo "    http://${LAN_IP}/cgi-bin/cm?cmnd=${cmd}"
+    echo "        http://${LAN_IP}/cgi-bin/cm?cmnd=${cmd}"
 done
-echo ""
-echo "    LuCI:  hALSAmrec (main navigation bar)"
-echo "    CLI:   autorecorderctl START|STOP|STATUS|PROBE"
-echo "    Init:  /etc/init.d/autorecorder start|stop|reload|status"
-echo "    Out:   /tmp/mnt/<epoch>_<ch>-<rate>-<fmt>.raw"
+echo "    CLI  ¦  autorecorderctl START|STOP|STATUS|PROBE"
+echo "    Init ¦  /etc/init.d/autorecorder start|stop|reload|status"
+echo "    LuCI ¦  hALSAmrec section (navbar)"
 echo ""
 
 printf "A reboot is recommended. Reboot now? [y/N]: "
