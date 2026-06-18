@@ -2,7 +2,7 @@
 
 ################################################################################
 # LuCI VU Meter Module Installer (Self-Contained)
-# 
+#
 # Comprehensive installation script for the LuCI VU Meter display module.
 # Automatically generates and installs all files inline.
 # Fixed for OpenWrt 24.10.7
