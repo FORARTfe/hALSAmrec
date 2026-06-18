@@ -19,7 +19,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Defaults
-ACTION="install"
+ACTION="uninstall"
 
 # Paths
 OPENWRT_ROOT="${OPENWRT_ROOT:-}"
