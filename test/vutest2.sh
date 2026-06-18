@@ -7,68 +7,6 @@
 # Automatically generates and installs all files inline.
 # Fixed for OpenWrt 24.10.x
 #
-# CHANGES FROM v1.1  —  7 bugs fixed:
-#
-#  [BUG-1] Wrong LUCI_VIEW_PATH
-#           Was:  /usr/share/luci-mod-admin-full/luasrc/view  ← build-tree only
-#           Now:  /usr/lib/lua/luci/view                      ← runtime path
-#           The old value is where the Makefile places source during package
-#           builds; it does not exist on a running router. LuCI's template
-#           renderer looks exclusively in /usr/lib/lua/luci/view/ at runtime,
-#           so the display page always produced a 404/500.
-#
-#  [BUG-2] LuCI module index cache never invalidated  ← PRIMARY MENU FIX
-#           LuCI serialises its full dispatcher index to /tmp/luci-indexcache
-#           and compiles per-module bytecode into /tmp/luci-modulecache/ on
-#           first startup.  Installing a new controller without wiping these
-#           caches means LuCI continues serving the old index — the new Lua
-#           file is on disk but never scanned.  clear_luci_cache() is now
-#           called at the end of both install and uninstall flows.
-#
-#  [BUG-3] nixio not explicitly required in controller
-#           OpenWrt 24 tightened Lua module scoping; nixio is no longer
-#           guaranteed to be a pre-loaded global in every controller context.
-#           A nil-access inside index() would silently abort menu registration
-#           with no visible error in the log.
-#           Fix: added  local nixio = require "nixio"  at the top of the file.
-#
-#  [BUG-4] sys.sysinfo() return-value binding was wrong
-#           luci.sys.sysinfo() returns: uptime, totalram, freeram, sharedram,
-#           bufferram — in that order.  The original code bound them to:
-#           mem_total, mem_cached, mem_buffered, mem_free, so mem_total was
-#           receiving system uptime in seconds.  Memory % was either 0 % or
-#           100 % depending on luck.
-#           Fix: replaced sys.sysinfo() entirely with direct /proc/meminfo
-#           parsing, which is unambiguous and more portable.
-#
-#  [BUG-5] top -bn1 unreliable for CPU measurement on BusyBox
-#           BusyBox top on many OpenWrt builds does not support -b (batch)
-#           mode or -n (iteration count) consistently; the grep pattern would
-#           silently fall through to the load-avg heuristic or produce wrong
-#           values.
-#           Fix: replaced with a /proc/stat two-snapshot delta computation.
-#           The previous CPU tick counters are persisted in /tmp/.vumeter_cpu
-#           across XHR poll cycles so that a proper busy/total ratio can be
-#           calculated.  On the very first poll (no cache yet) the fallback is
-#           load1 * 100 as before.
-#
-#  [BUG-6] Network stats were math.random() mock values
-#           The original code used math.random(5,45) for RX and math.random(5,35)
-#           for TX — completely fictional.
-#           Fix: reads /proc/net/dev byte counters, persists them in
-#           /tmp/.vumeter_net, computes delta bytes/s, and normalises against
-#           a 100 Mbit/s reference (12 500 000 B/s).  Probes br-lan → eth0 →
-#           eth1 → ether0 in order.  Negative deltas (interface counter reset
-#           after ifdown/ifup) are clamped to 0.
-#
-#  [BUG-7] Controller file installed with chmod 755
-#           Lua source files are loaded by the Lua interpreter; the OS execute
-#           bit is semantically meaningless for them and a minor security hygiene
-#           issue.  Fixed to 644 (owner-rw, world-r).
-#
-#  [MISC]  Uninstall now also removes the /tmp/.vumeter_{cpu,net} state files.
-#          Module version bumped to 1.2.
-#
 ################################################################################
 
 set -e
