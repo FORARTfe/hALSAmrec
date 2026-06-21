@@ -12,6 +12,8 @@ A customization of J. Bruce Fields' [openwrt-recording](https://github.com/bfiel
 
 :white_check_mark: automated tracks splitting script (on Windows too).
 
+:white_check_mark: LuCi dedicated page.
+
 ## :construction: Todo
 
-:white_square_button: LuCi dedicated page.
+:white_square_button: Input monitoring
