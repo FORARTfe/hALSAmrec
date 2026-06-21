@@ -2,9 +2,9 @@ A customization of J. Bruce Fields' [openwrt-recording](https://github.com/bfiel
 
 ## :sound: Features
 
-:white_check_mark: Setup script;
+:white_check_mark: [Heredocs](https://en.wikipedia.org/wiki/Here_document) setup script;
 
-:white_check_mark: automatic [USB Class Compliant audio device](https://github.com/FORARTfe/hALSAmrec/wiki/USB-Class-Compliant-audio-devices) probing;
+:white_check_mark: [USB Class Compliant audio device](https://github.com/FORARTfe/hALSAmrec/wiki/USB-Class-Compliant-audio-devices) autoprobe;
 
 :white_check_mark: [exFAT](https://github.com/FORARTfeh/hALSAmrec/wiki/Why-exFAT-Was-Chosen-for-the-SD-Card-Recording-Partition) (SDcard) recording;
 
@@ -12,7 +12,7 @@ A customization of J. Bruce Fields' [openwrt-recording](https://github.com/bfiel
 
 :white_check_mark: automated tracks splitting script (on Windows too).
 
-:white_check_mark: LuCi dedicated page.
+:white_check_mark: LuCi dedicated page (with manual audio device probing).
 
 ## :construction: In progress
 
