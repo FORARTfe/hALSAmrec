@@ -16,4 +16,4 @@ A customization of J. Bruce Fields' [openwrt-recording](https://github.com/bfiel
 
 ## :construction: In progress
 
-:white_square_button: Input monitoring
+:white_square_button: Input levels live monitoring LuCI (sub)page.
