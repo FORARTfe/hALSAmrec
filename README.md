@@ -14,6 +14,6 @@ A customization of J. Bruce Fields' [openwrt-recording](https://github.com/bfiel
 
 :white_check_mark: LuCi dedicated page.
 
-## :construction: Todo
+## :construction: In progress
 
 :white_square_button: Input monitoring
