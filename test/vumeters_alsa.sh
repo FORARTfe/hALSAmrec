@@ -48,8 +48,8 @@ Usage: sh $0 [options]
 
 Options:
   --device DEV       ALSA capture device. Default: auto
-                     auto selects the capture interface with most channels.
-                     Examples: plughw:1,0  hw:1,0  default
+                     auto selects the capture interface with most probed hardware channels.
+                     Examples: hw:1,0  plughw:1,0  default
   --channels N|auto  Capture channel count. Default: auto
   --rate N|auto      Capture sample rate. Default: auto (prefers 48000 Hz)
   --poll-ms N        Browser polling interval in ms, 50-5000. Default: ${POLL_MS}
@@ -282,7 +282,8 @@ ERR_FILE="${STATE_DIR}/capture.err"
 DEFAULT_RATE="48000"
 DEFAULT_FRAMES="4096"
 MAX_CHANNELS="256"
-FORMAT="S16_LE"
+DEFAULT_FORMAT="S16_LE"
+PROBE_CHANNELS_INVALID="9999"
 
 mkdir -p "$STATE_DIR"
 
@@ -341,94 +342,222 @@ emit_json() {
 	fi
 }
 
-# Parse channel count and preferred rate from /proc/asound/cardN/streamM.
-stream_caps() {
-	awk '
-		BEGIN { cap=0; ch=0; first_rate=0; preferred_rate=0 }
-		/^[[:space:]]*Capture:/  { cap=1; next }
-		/^[[:space:]]*Playback:/ { cap=0; next }
-		cap && /^[[:space:]]*Channels:/ {
-			line=$0; gsub(/[^0-9]+/," ",line)
-			n=split(line,a," ")
-			for(i=1;i<=n;i++) { v=a[i]+0; if(v>ch) ch=v }
+list_audio_devices() {
+	command -v arecord >/dev/null 2>&1 || return 1
+	arecord -l 2>/dev/null | \
+		sed -n 's/^card \([0-9][0-9]*\):.* device \([0-9][0-9]*\):.*/\1:\2/p' | \
+		awk '!seen[$0]++'
+}
+
+first_audio_device() {
+	list_audio_devices | sed -n '1p'
+}
+
+# Optimized ALSA hardware probing.  It uses arecord against hw:CARD,DEV so
+# the channel count comes from the real capture device, not from plughw/default
+# channel remapping.  An optional CARD:DEV argument is accepted for internal
+# probing; without it the first capture device returned by arecord -l is used.
+probe_device() {
+	command -v arecord >/dev/null 2>&1 || { echo "arecord not installed"; return 1; }
+	audio_dev="${1:-$(first_audio_device || true)}"
+	if [ -z "$audio_dev" ]; then
+		echo "No ALSA capture device found"
+		echo "--- arecord -l output ---"
+		arecord -l 2>&1 || true
+		return 1
+	fi
+	case "$audio_dev" in
+		[0-9]*:[0-9]*) ;;
+		*) echo "Invalid ALSA device id: ${audio_dev}"; return 1 ;;
+	esac
+
+	# Use intentionally invalid parameters to force arecord to print the full
+	# hw-params block and exit instead of starting a long-running recording when
+	# the default arecord format happens to be valid for the device.
+	arecord -D "hw:${audio_dev%%:*},${audio_dev##*:}" \
+		--dump-hw-params -f "$DEFAULT_FORMAT" \
+		-c "$PROBE_CHANNELS_INVALID" -r 1 -d 1 /dev/null 2>&1
+}
+
+parse_card_dev_from_device() {
+	case "$1" in
+		hw:[0-9]*,[0-9]*|plughw:[0-9]*,[0-9]*)
+			printf '%s\n' "$1" | sed -n \
+				's/^[^:]*hw:\([0-9][0-9]*\),\([0-9][0-9]*\).*$/\1:\2/p'
+			;;
+		[0-9]*:[0-9]*)
+			printf '%s\n' "$1"
+			;;
+	esac
+}
+
+hw_params_summary() {
+	awk -v default_rate="$DEFAULT_RATE" '
+		function has_token(line, token,    re) {
+			re = "(^|[^A-Za-z0-9_])" token "([^A-Za-z0-9_]|$)"
+			return (line ~ re)
 		}
-		cap && /^[[:space:]]*Rates:/ {
-			line=$0; gsub(/[^0-9]+/," ",line)
-			n=split(line,a," ")
-			for(i=1;i<=n;i++) {
-				r=a[i]+0; if(r<=0) continue
-				if(first_rate==0) first_rate=r
-				if(r==48000) preferred_rate=48000
+		function parse_numbers(line, kind,    n, a, i, v) {
+			gsub(/[^0-9]+/, " ", line)
+			n = split(line, a, " ")
+			for (i = 1; i <= n; i++) {
+				v = a[i] + 0
+				if (v <= 0) continue
+				if (kind == "channels") {
+					if (min_ch == 0 || v < min_ch) min_ch = v
+					if (v > max_ch) max_ch = v
+				} else if (kind == "rate") {
+					if (first_rate == 0) first_rate = v
+					if (min_rate == 0 || v < min_rate) min_rate = v
+					if (v > max_rate) max_rate = v
+				}
 			}
 		}
+		BEGIN {
+			default_rate += 0
+			min_ch = max_ch = 0
+			first_rate = min_rate = max_rate = 0
+			has_s16le = has_s16be = 0
+		}
+		/^[[:space:]]*FORMAT:/ {
+			if (has_token($0, "S16_LE")) has_s16le = 1
+			if (has_token($0, "S16_BE")) has_s16be = 1
+		}
+		/^[[:space:]]*CHANNELS:/ { parse_numbers($0, "channels") }
+		/^[[:space:]]*RATE:/     { parse_numbers($0, "rate") }
 		END {
-			rate = preferred_rate ? preferred_rate : first_rate
-			if(rate==0) rate=48000
-			if(ch>0) print ch " " rate
+			if (max_ch <= 0) exit 1
+			if (min_rate > 0 && default_rate >= min_rate && default_rate <= max_rate)
+				rate = default_rate
+			else if (first_rate > 0)
+				rate = first_rate
+			else
+				rate = default_rate
+
+			if (has_s16le)
+				fmt = "S16_LE"
+			else if (has_s16be)
+				fmt = "S16_BE"
+			else
+				fmt = "S16_LE"
+
+			mode = (has_s16le || has_s16be) ? "hw" : "plughw"
+			printf "%d|%d|%s|%s\n", max_ch, rate, fmt, mode
 		}
 	' "$1"
 }
 
-caps_for_card_dev() {
-	card="$1"; dev="$2"
-	stream_file="/proc/asound/card${card}/stream${dev}"
-
-	if [ -r "$stream_file" ]; then
-		stream_caps "$stream_file"
-		return 0
-	fi
-
-	best_ch="0"; best_rate="$DEFAULT_RATE"
-	for f in "/proc/asound/card${card}"/stream*; do
-		[ -r "$f" ] || continue
-		caps="$(stream_caps "$f" 2>/dev/null || true)"
-		[ -n "$caps" ] || continue
-		set -- $caps
-		[ "$1" -gt "$best_ch" ] && { best_ch="$1"; best_rate="$2"; }
-	done
-	[ "$best_ch" -gt 0 ] && printf '%s %s\n' "$best_ch" "$best_rate"
+configured_rate_supported() {
+	params_file="$1"; wanted="$2"
+	awk -v wanted="$wanted" '
+		/^[[:space:]]*RATE:/ {
+			line=$0
+			gsub(/[^0-9]+/, " ", line)
+			n=split(line,a," ")
+			for(i=1;i<=n;i++) {
+				v=a[i]+0
+				if(v<=0) continue
+				if(first==0) first=v
+				if(min==0 || v<min) min=v
+				if(v>max) max=v
+				if(v==wanted) exact=1
+			}
+		}
+		END {
+			if (exact) exit 0
+			if (min > 0 && wanted >= min && wanted <= max) exit 0
+			exit 1
+		}
+	' "$params_file"
 }
 
-parse_card_dev_from_device() {
-	printf '%s\n' "$1" | sed -n \
-		's/^[^:]*hw:\([0-9][0-9]*\),\([0-9][0-9]*\).*$/\1 \2/p'
+host_endian() {
+	word="$(printf '\001\000' | od -An -tu2 2>/dev/null | awk '{ print $1; exit }')"
+	[ "$word" = "1" ] && printf 'LE\n' || printf 'BE\n'
 }
 
-detect_usb_capture() {
-	best_card=""; best_dev=""; best_ch="0"; best_rate="$DEFAULT_RATE"
+capture_device_from_mode() {
+	mode="$1"; card_dev="$2"
+	card="${card_dev%%:*}"; dev="${card_dev##*:}"
+	case "$mode" in
+		hw)     printf 'hw:%s,%s\n' "$card" "$dev" ;;
+		*)      printf 'plughw:%s,%s\n' "$card" "$dev" ;;
+	esac
+}
 
-	for f in /proc/asound/card[0-9]*/stream[0-9]*; do
-		[ -r "$f" ] || continue
-		card="$(printf '%s' "$f" | sed -n 's#.*/card\([0-9]*\)/stream.*#\1#p')"
-		dev="$(printf '%s'  "$f" | sed -n 's#.*/stream\([0-9]*\)$#\1#p')"
-		[ -n "$card" ] && [ -n "$dev" ] || continue
-		caps="$(stream_caps "$f" 2>/dev/null || true)"
-		[ -n "$caps" ] || continue
-		set -- $caps
-		if [ "$1" -gt "$best_ch" ]; then
-			best_card="$card"; best_dev="$dev"; best_ch="$1"; best_rate="$2"
+select_auto_capture() {
+	best_card_dev=""; best_ch="0"; best_rate="$DEFAULT_RATE"; best_fmt="$DEFAULT_FORMAT"; best_mode="hw"
+	devs="$(list_audio_devices 2>/dev/null || true)"
+	[ -n "$devs" ] || { echo "no ALSA capture device found" >&2; return 1; }
+
+	for audio_dev in $devs; do
+		probe_file="${STATE_DIR}/probe.${audio_dev%:*}.${audio_dev#*:}.$$"
+		probe_device "$audio_dev" > "$probe_file" 2>&1 || true
+		summary="$(hw_params_summary "$probe_file" 2>/dev/null || true)"
+		rm -f "$probe_file"
+		[ -n "$summary" ] || continue
+
+		old_ifs="$IFS"; IFS='|'; set -- $summary; IFS="$old_ifs"
+		ch="$1"; rate="$2"; fmt="$3"; mode="$4"
+		if [ "$ch" -gt "$best_ch" ]; then
+			best_card_dev="$audio_dev"
+			best_ch="$ch"
+			best_rate="$rate"
+			best_fmt="$fmt"
+			best_mode="$mode"
 		fi
 	done
 
-	[ "$best_ch" -gt 0 ] || return 1
-	printf 'plughw:%s,%s|%s|%s|USB capture card %s device %s\n' \
-		"$best_card" "$best_dev" "$best_ch" "$best_rate" "$best_card" "$best_dev"
+	[ -n "$best_card_dev" ] || { echo "no usable ALSA capture hw-params found" >&2; return 1; }
+	capture_dev="$(capture_device_from_mode "$best_mode" "$best_card_dev")"
+	msg="ALSA hw-params probe ${best_card_dev}"
+	[ "$best_mode" = "plughw" ] && msg="${msg}; using plughw only for S16 sample-format conversion"
+	printf '%s|%s|%s|%s|%s\n' "$capture_dev" "$best_ch" "$best_rate" "$best_fmt" "$msg"
 }
 
-detect_arecord_capture() {
-	line="$(arecord -l 2>/dev/null | \
-		sed -n 's/^card \([0-9]*\):.* device \([0-9]*\):.*/\1 \2/p' | sed -n '1p')"
-	[ -n "$line" ] || return 1
-	set -- $line
-	card="$1"; dev="$2"
-	caps="$(caps_for_card_dev "$card" "$dev" 2>/dev/null || true)"
-	if [ -n "$caps" ]; then
-		set -- $caps; ch="$1"; rate="$2"
-	else
-		ch="2"; rate="$DEFAULT_RATE"
+resolve_configured_capture() {
+	configured_device="$1"
+	card_dev="$(parse_card_dev_from_device "$configured_device")"
+
+	# Non-numeric ALSA names are allowed, but they cannot be probed accurately.
+	# They are therefore accepted only with an explicit channel count.
+	if [ -z "$card_dev" ]; then
+		printf '%s|%s|%s|%s|%s\n' "$configured_device" "" "$DEFAULT_RATE" "$DEFAULT_FORMAT" \
+			"configured ALSA capture device ${configured_device}; set channels explicitly for non-hw ALSA names"
+		return 0
 	fi
-	printf 'plughw:%s,%s|%s|%s|ALSA capture card %s device %s\n' \
-		"$card" "$dev" "$ch" "$rate" "$card" "$dev"
+
+	probe_file="${STATE_DIR}/probe.${card_dev%:*}.${card_dev#*:}.$$"
+	probe_device "$card_dev" > "$probe_file" 2>&1 || true
+	summary="$(hw_params_summary "$probe_file" 2>/dev/null || true)"
+	if [ -z "$summary" ]; then
+		err="$(cat "$probe_file" 2>/dev/null || true)"
+		rm -f "$probe_file"
+		[ -n "$err" ] || err="hw-params probe failed"
+		echo "$err" >&2
+		return 1
+	fi
+
+	old_ifs="$IFS"; IFS='|'; set -- $summary; IFS="$old_ifs"
+	channels="$1"; rate="$2"; fmt="$3"; mode="$4"
+
+	configured_rate="$(uci_get sample_rate auto)"
+	if [ "$configured_rate" != "auto" ] && ! configured_rate_supported "$probe_file" "$configured_rate"; then
+		rm -f "$probe_file"
+		echo "configured sample rate ${configured_rate} is not in hw-params for ${card_dev}" >&2
+		return 1
+	fi
+	rm -f "$probe_file"
+
+	# If the user configured plughw explicitly, keep it.  Otherwise prefer hw
+	# when S16 is supported because hw does no channel remapping.
+	case "$configured_device" in
+		plughw:*) capture_dev="$configured_device" ;;
+		*)       capture_dev="$(capture_device_from_mode "$mode" "$card_dev")" ;;
+	esac
+	msg="configured ALSA capture device ${configured_device}; hw-params probe ${card_dev}"
+	[ "$mode" = "plughw" ] && msg="${msg}; using plughw only for S16 sample-format conversion"
+	printf '%s|%s|%s|%s|%s\n' "$capture_dev" "$channels" "$rate" "$fmt" "$msg"
 }
 
 resolve_capture() {
@@ -436,28 +565,15 @@ resolve_capture() {
 	configured_channels="$(uci_get channels       auto)"
 	configured_rate="$(uci_get    sample_rate      auto)"
 
-	device=""; channels=""; rate=""; message=""
-
 	if [ "$configured_device" = "auto" ]; then
-		det="$(detect_usb_capture 2>/dev/null || true)"
-		[ -n "$det" ] || det="$(detect_arecord_capture 2>/dev/null || true)"
-		if [ -z "$det" ]; then
-			echo "no ALSA capture device found" >&2; return 1
-		fi
-		old_ifs="$IFS"; IFS='|'; set -- $det; IFS="$old_ifs"
-		device="$1"; channels="$2"; rate="$3"; message="$4"
+		resolved="$(select_auto_capture)" || return 1
 	else
-		device="$configured_device"
-		message="configured ALSA capture device ${configured_device}"
-		card_dev="$(parse_card_dev_from_device "$configured_device")"
-		if [ -n "$card_dev" ]; then
-			set -- $card_dev
-			caps="$(caps_for_card_dev "$1" "$2" 2>/dev/null || true)"
-			if [ -n "$caps" ]; then
-				set -- $caps; channels="$1"; rate="$2"
-			fi
-		fi
+		resolved="$(resolve_configured_capture "$configured_device")" || return 1
 	fi
+
+	old_ifs="$IFS"; IFS='|'; set -- $resolved; IFS="$old_ifs"
+	device="$1"; channels="$2"; rate="$3"; format="$4"; message="$5"
+	detected_channels="$channels"
 
 	if [ "$configured_channels" != "auto" ]; then
 		is_uint "$configured_channels" && \
@@ -465,6 +581,11 @@ resolve_capture() {
 		[ "$configured_channels" -le "$MAX_CHANNELS" ] || {
 			echo "invalid configured channel count: ${configured_channels}" >&2; return 1
 		}
+		if [ -n "$detected_channels" ] && is_uint "$detected_channels" && \
+		   [ "$configured_channels" -gt "$detected_channels" ]; then
+			echo "configured channel count ${configured_channels} exceeds probed hardware channels ${detected_channels}" >&2
+			return 1
+		fi
 		channels="$configured_channels"
 	fi
 
@@ -486,7 +607,8 @@ resolve_capture() {
 	fi
 
 	[ -n "$rate" ] && is_uint "$rate" || rate="$DEFAULT_RATE"
-	printf '%s|%s|%s|%s\n' "$device" "$channels" "$rate" "$message"
+	[ -n "$format" ] || format="$DEFAULT_FORMAT"
+	printf '%s|%s|%s|%s|%s\n' "$device" "$channels" "$rate" "$format" "$message"
 }
 
 detect_json() {
@@ -494,8 +616,8 @@ detect_json() {
 	err_file="${STATE_DIR}/detect_err.$$"
 	if resolve_capture > "$det_file" 2> "$err_file"; then
 		old_ifs="$IFS"; IFS='|'; set -- $(cat "$det_file"); IFS="$old_ifs"
-		device="$1"; channels="$2"; rate="$3"
-		message="$4; capture daemon has not published samples yet"
+		device="$1"; channels="$2"; rate="$3"; format="$4"
+		message="$5; format ${format}; capture daemon has not published samples yet"
 		emit_json - false "$channels" "$rate" "$(zero_values "$channels")" "$device" "$message"
 	else
 		err="$(cat "$err_file" 2>/dev/null || true)"
@@ -531,88 +653,150 @@ run_capture() {
 
 		old_ifs="$IFS"; IFS='|'; set -- $(cat "$resolve_file"); IFS="$old_ifs"
 		rm -f "$resolve_file"
-		device="$1"; channels="$2"; rate="$3"; message="$4"
+		device="$1"; channels="$2"; rate="$3"; format="$4"; message="$5"
 
 		frames="$(uci_get frames_per_update "$DEFAULT_FRAMES")"
 		{ is_uint "$frames" && [ "$frames" -ge 256 ] && [ "$frames" -le 65536 ]; } \
 			|| frames="$DEFAULT_FRAMES"
 
 		emit_json "$STATE_FILE" true "$channels" "$rate" \
-			"$(zero_values "$channels")" "$device" "${message}; capture starting"
+			"$(zero_values "$channels")" "$device" "${message}; format ${format}; capture starting"
 
 		dev_json="$(json_escape "$device")"
-		msg_json="$(json_escape "$message")"
+		msg_json="$(json_escape "${message}; format ${format}")"
 		tmp_file="${STATE_FILE}.tmp"
 		rm -f "$ERR_FILE"
 
-		# Pipeline:  arecord -> od -> awk
-		#
-		# od -An -v -tu2
-		#   Outputs one unsigned decimal 16-bit word per sample.  On any
-		#   little-endian machine (all ARM/x86 OpenWrt targets) this gives the
-		#   correct S16_LE value directly.  Absolute value for peak detection:
-		#   if word > 32767 then abs = 65536 - word.
-		#
-		#   Compared to the -tu1 / byte-pair approach this halves awk field
-		#   reads and removes the have_lo state machine, cutting per-sample
-		#   CPU cost roughly in half on low-power SBCs.
-		#
-		# The awk script emits JSON to a .tmp file then calls mv(1) for an
-		# atomic rename; the levels helper therefore always reads a complete
-		# JSON object or nothing at all.
-		arecord -q \
-			-D "$device" -t raw -f "$FORMAT" \
-			-c "$channels" -r "$rate" - 2> "$ERR_FILE" | \
-		od -An -v -tu2 | \
-		awk \
-			-v ch="$channels"   \
-			-v frames="$frames" \
-			-v out="$STATE_FILE" \
-			-v tmp="$tmp_file"  \
-			-v dev="$dev_json"  \
-			-v msg="$msg_json"  \
-			-v rate="$rate"     \
-		'
-		BEGIN {
-			for (i = 1; i <= ch; i++) peak[i] = 0
-			sample_index = 0
-			frames_seen  = 0
-			sequence     = 0
-		}
-		{
-			for (i = 1; i <= NF; i++) {
-				s = $i + 0
-				# Unsigned 16-bit -> absolute value (two-complement mirror)
-				if (s > 32767) s = 65536 - s
+		endian="LE"
+		[ "$format" = "S16_BE" ] && endian="BE"
+		native_endian="$(host_endian)"
 
+		# Prefer od -tu2 when the capture stream endian matches the CPU endian;
+		# otherwise parse bytes explicitly.  This keeps the fast path on common
+		# little-endian targets but fixes level errors on big-endian OpenWrt.
+		if { [ "$format" = "S16_LE" ] && [ "$native_endian" = "LE" ]; } || \
+		   { [ "$format" = "S16_BE" ] && [ "$native_endian" = "BE" ]; }; then
+			arecord -q \
+				-D "$device" -t raw -f "$format" \
+				-c "$channels" -r "$rate" - 2> "$ERR_FILE" | \
+			od -An -v -tu2 | \
+			awk \
+				-v ch="$channels"   \
+				-v frames="$frames" \
+				-v out="$STATE_FILE" \
+				-v tmp="$tmp_file"  \
+				-v dev="$dev_json"  \
+				-v msg="$msg_json"  \
+				-v rate="$rate"     \
+			'
+			function process_sample(s) {
+				if (s > 32767) s = 65536 - s
 				c = (sample_index % ch) + 1
 				if (s > peak[c]) peak[c] = s
 				sample_index++
 
 				if (c == ch) {
 					frames_seen++
-					if (frames_seen >= frames) {
-						sequence++
-						printf("{\"ok\":true,\"timestamp\":%d,\"sequence\":%d," \
-						       "\"device\":\"%s\",\"channels\":%d,\"rate\":%d," \
-						       "\"values\":[",
-						       systime(), sequence, dev, ch, rate) > tmp
-						for (j = 1; j <= ch; j++) {
-							pct = int((peak[j] * 100 + 16383) / 32767)
-							if (pct > 100) pct = 100
-							if (j > 1) printf(",") > tmp
-							printf("%d", pct) > tmp
-							peak[j] = 0
-						}
-						printf("],\"message\":\"%s\"}\n", msg) > tmp
-						close(tmp)
-						system("mv " tmp " " out)
-						frames_seen = 0
-					}
+					if (frames_seen >= frames) emit_levels()
 				}
 			}
-		}
-		'
+			function emit_levels(    j, pct) {
+				sequence++
+				printf("{\"ok\":true,\"timestamp\":%d,\"sequence\":%d," \
+				       "\"device\":\"%s\",\"channels\":%d,\"rate\":%d," \
+				       "\"values\":[",
+				       systime(), sequence, dev, ch, rate) > tmp
+				for (j = 1; j <= ch; j++) {
+					pct = int((peak[j] * 100 + 16383) / 32767)
+					if (pct > 100) pct = 100
+					if (j > 1) printf(",") > tmp
+					printf("%d", pct) > tmp
+					peak[j] = 0
+				}
+				printf("],\"message\":\"%s\"}\n", msg) > tmp
+				close(tmp)
+				system("mv " tmp " " out)
+				frames_seen = 0
+			}
+			BEGIN {
+				for (i = 1; i <= ch; i++) peak[i] = 0
+				sample_index = 0
+				frames_seen  = 0
+				sequence     = 0
+			}
+			{
+				for (i = 1; i <= NF; i++) process_sample($i + 0)
+			}
+			'
+		else
+			arecord -q \
+				-D "$device" -t raw -f "$format" \
+				-c "$channels" -r "$rate" - 2> "$ERR_FILE" | \
+			od -An -v -tu1 | \
+			awk \
+				-v ch="$channels"   \
+				-v frames="$frames" \
+				-v out="$STATE_FILE" \
+				-v tmp="$tmp_file"  \
+				-v dev="$dev_json"  \
+				-v msg="$msg_json"  \
+				-v rate="$rate"     \
+				-v endian="$endian" \
+			'
+			function process_sample(s) {
+				if (s > 32767) s = 65536 - s
+				c = (sample_index % ch) + 1
+				if (s > peak[c]) peak[c] = s
+				sample_index++
+
+				if (c == ch) {
+					frames_seen++
+					if (frames_seen >= frames) emit_levels()
+				}
+			}
+			function process_byte(b) {
+				if (!have_byte) {
+					first_byte = b
+					have_byte = 1
+					return
+				}
+				if (endian == "LE")
+					s = first_byte + b * 256
+				else
+					s = first_byte * 256 + b
+				have_byte = 0
+				process_sample(s)
+			}
+			function emit_levels(    j, pct) {
+				sequence++
+				printf("{\"ok\":true,\"timestamp\":%d,\"sequence\":%d," \
+				       "\"device\":\"%s\",\"channels\":%d,\"rate\":%d," \
+				       "\"values\":[",
+				       systime(), sequence, dev, ch, rate) > tmp
+				for (j = 1; j <= ch; j++) {
+					pct = int((peak[j] * 100 + 16383) / 32767)
+					if (pct > 100) pct = 100
+					if (j > 1) printf(",") > tmp
+					printf("%d", pct) > tmp
+					peak[j] = 0
+				}
+				printf("],\"message\":\"%s\"}\n", msg) > tmp
+				close(tmp)
+				system("mv " tmp " " out)
+				frames_seen = 0
+			}
+			BEGIN {
+				for (i = 1; i <= ch; i++) peak[i] = 0
+				sample_index = 0
+				frames_seen  = 0
+				sequence     = 0
+				have_byte    = 0
+			}
+			{
+				for (i = 1; i <= NF; i++) process_byte($i + 0)
+			}
+			'
+		fi
 
 		err="$(cat "$ERR_FILE" 2>/dev/null || true)"
 		[ -n "$err" ] || err="capture pipeline stopped"
@@ -625,7 +809,8 @@ run_capture() {
 case "${1:-run}" in
 	run)     run_capture ;;
 	detect)  detect_json ;;
-	*)       echo "Usage: $0 [run|detect]" >&2; exit 1 ;;
+	probe)   probe_device "${2:-}" ;;
+	*)       echo "Usage: $0 [run|detect|probe [CARD:DEV]]" >&2; exit 1 ;;
 esac
 EOF_CAPTURE
 
