@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# hALSAmrec installer v3.1
+# ALSAmrec installer v3.1
 # CLI + CGI + LuCI — full stack, single installer.
 #
 # Original recorder daemon by J. Bruce Fields, 2024.
@@ -56,7 +56,7 @@ done
 echo "[*] Installing recorder daemon..."
 install /usr/sbin/recorder 0755 <<'EOF_RECORDER'
 #!/bin/sh
-# hALSAmrec recorder daemon — GPL v3
+# ALSAmrec recorder daemon — GPL v3
 
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 MNT=/tmp/mnt
@@ -199,7 +199,7 @@ EOF_RECORDER
 echo "[*] Installing control CLI..."
 install /usr/sbin/autorecorderctl 0755 <<'EOF_CTL'
 #!/bin/sh
-# hALSAmrec control helper: START, STOP, STATUS, PROBE.
+# ALSAmrec control helper: START, STOP, STATUS, PROBE.
 
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 RECORDER=/usr/sbin/recorder
@@ -310,7 +310,7 @@ EOF_HOTPLUG_USB
 echo "[*] Installing CGI endpoint..."
 install /www/cgi-bin/cm 0755 <<'EOF_CGI'
 #!/bin/sh
-# hALSAmrec CGI endpoint: /cgi-bin/cm?cmnd=START|STOP|STATUS|PROBE
+# ALSAmrec CGI endpoint: /cgi-bin/cm?cmnd=START|STOP|STATUS|PROBE
 
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 CTL=/usr/sbin/autorecorderctl
@@ -342,7 +342,7 @@ ln -sf /www/cgi-bin/cm /www/cgi-bin/controlweb_cgi
 echo "[*] Installing RPCD backend..."
 install /usr/libexec/rpcd/autorecorder 0755 <<'EOF_RPCD'
 #!/bin/sh
-# hALSAmrec rpcd plugin — exposes status/start/stop/probe over ubus.
+# ALSAmrec rpcd plugin — exposes status/start/stop/probe over ubus.
 
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 CTL=/usr/sbin/autorecorderctl
@@ -483,7 +483,7 @@ return view.extend({
         poll.add(refreshStatus, 5);
 
         return E('div', { 'class': 'cbi-map' }, [
-            E('h2', {}, _('hALSAmrec')),
+            E('h2', {}, _('ALSAmrec')),
             E('div', { 'class': 'cbi-map-descr' },
                 _('Control the autorecorder daemon. Exposes the same START, STOP, STATUS and PROBE functions as the CGI endpoint.')),
             E('div', { 'class': 'cbi-section' }, [
@@ -500,7 +500,7 @@ echo "[*] Installing LuCI menu and ACL..."
 install /usr/share/luci/menu.d/autorecorder.json 0644 <<'EOF_MENU'
 {
     "admin/autorecorder": {
-        "title": "hALSAmrec",
+        "title": "ALSAmrec",
         "action": { "type": "view", "path": "autorecorder/main" },
         "depends": { "acl": [ "luci-app-autorecorder" ] }
     }
@@ -510,7 +510,7 @@ EOF_MENU
 install /usr/share/rpcd/acl.d/autorecorder.json 0644 <<'EOF_ACL'
 {
     "luci-app-autorecorder": {
-        "description": "Grant LuCI access to hALSAmrec",
+        "description": "Grant LuCI access to ALSAmrec",
         "read":  { "ubus": { "autorecorder": [ "status", "probe" ] } },
         "write": { "ubus": { "autorecorder": [ "start",  "stop"  ] } }
     }
@@ -536,7 +536,7 @@ for cmd in START STOP STATUS PROBE; do
 done
 echo "    CLI  ¦  autorecorderctl START|STOP|STATUS|PROBE"
 echo "    Init ¦  /etc/init.d/autorecorder start|stop|reload|status"
-echo "    LuCI ¦  hALSAmrec section (navbar)"
+echo "    LuCI ¦  ALSAmrec section (navbar)"
 echo ""
 
 printf "A reboot is recommended. Reboot now? [y/N]: "
